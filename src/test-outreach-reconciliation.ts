@@ -4,8 +4,10 @@ import {
   claimOutreachSend,
   markOutreachNeedsReconciliation,
 } from "./outreach-send.js";
+import { getProspectById } from "./prospects.js";
 
 const prospectId = "03336ca4-c95a-406f-96a3-066fad35e107";
+const gmailDraftId = `TEST_GMAIL_DRAFT_ID_${Date.now()}`;
 
 async function main() {
   // Put our controlled prospect back into a sendable test state.
@@ -39,7 +41,7 @@ async function main() {
       "test@devbytaylor.com",
       "Relay reconciliation test",
       "Controlled development-only reconciliation test.",
-      "TEST_GMAIL_DRAFT_ID_2",
+      gmailDraftId,
     ],
   );
 
@@ -64,6 +66,10 @@ async function main() {
 
   console.log("\nReconciliation result:");
   console.log(reconciliation);
+
+  const prospect = await getProspectById(prospectId);
+  console.log("\nProspect stage after reconciliation:");
+  console.log(prospect?.stage);
 
   await db.end();
 }
