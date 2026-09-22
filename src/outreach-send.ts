@@ -108,3 +108,97 @@ export async function claimOutreachSend(
     client.release();
   }
 }
+
+export type CompleteOutreachResult =
+  | {
+      completed: true;
+      draft: MessageDraft;
+    }
+  | {
+      completed: false;
+      reason: string;
+    };
+
+export async function completeOutreachSend(
+  prospectId: string,
+  draftId: string,
+  sentMessageId: string,
+  gmailThreadId: string,
+): Promise<CompleteOutreachResult> {
+  const client = await db.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const draftResult = await client.query<MessageDraft>(
+      `
+        SELECT *
+        FROM message_drafts
+        WHERE id = $1
+          AND prospect_id = $2
+        FOR UPDATE;
+      `,
+      [draftId, prospectId],
+    );
+
+    const draft = draftResult.rows[0];
+
+    if (!draft) {
+      await client.query("ROLLBACK");
+
+      return {
+        completed: false,
+        reason: "Outreach draft not found.",
+      };
+    }
+
+    if (draft.send_status !== "sending") {
+      await client.query("ROLLBACK");
+
+      return {
+        completed: false,
+        reason: `Draft cannot be completed. Current send status: ${draft.send_status}`,
+      };
+    }
+
+    const updatedDraft = await client.query<MessageDraft>(
+      `
+        UPDATE message_drafts
+        SET
+          send_status = 'sent',
+          review_status = 'sent',
+          sent_message_id = $3,
+          gmail_thread_id = $4,
+          sent_at = now(),
+          updated_at = now()
+        WHERE id = $1
+          AND prospect_id = $2
+        RETURNING *;
+      `,
+      [draftId, prospectId, sentMessageId, gmailThreadId],
+    );
+
+    await client.query(
+      `
+        UPDATE prospects
+        SET
+          stage = 'outreach_sent',
+          updated_at = now()
+        WHERE id = $1;
+      `,
+      [prospectId],
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      completed: true,
+      draft: updatedDraft.rows[0]!,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
