@@ -21,6 +21,14 @@ const pool = new Pool({
 });
 
 async function main() {
+  const migrationFile = process.argv[2];
+
+  if (!migrationFile) {
+    throw new Error(
+      "Migration file required. Example: npx tsx src/run-migration.ts migrations/002_create_message_drafts.sql",
+    );
+  }
+
   const sql = await readFile(migrationFile, "utf8");
 
   await pool.query(sql);
