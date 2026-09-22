@@ -202,3 +202,84 @@ export async function completeOutreachSend(
     client.release();
   }
 }
+
+export async function markOutreachNeedsReconciliation(
+  prospectId: string,
+  draftId: string,
+  reason: string,
+): Promise<CompleteOutreachResult> {
+  const client = await db.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const draftResult = await client.query<MessageDraft>(
+      `
+        SELECT *
+        FROM message_drafts
+        WHERE id = $1
+          AND prospect_id = $2
+        FOR UPDATE;
+      `,
+      [draftId, prospectId],
+    );
+
+    const draft = draftResult.rows[0];
+
+    if (!draft) {
+      await client.query("ROLLBACK");
+
+      return {
+        completed: false,
+        reason: "Outreach draft not found.",
+      };
+    }
+
+    if (draft.send_status !== "sending") {
+      await client.query("ROLLBACK");
+
+      return {
+        completed: false,
+        reason: `Draft cannot enter reconciliation. Current send status: ${draft.send_status}`,
+      };
+    }
+
+    const updated = await client.query<MessageDraft>(
+      `
+        UPDATE message_drafts
+        SET
+          send_status = 'needs_reconciliation',
+          send_error = $3,
+          reconciliation_at = now(),
+          updated_at = now()
+        WHERE id = $1
+          AND prospect_id = $2
+        RETURNING *;
+      `,
+      [draftId, prospectId, reason],
+    );
+
+    await client.query(
+      `
+    UPDATE prospects
+    SET
+      stage = 'send_reconciliation',
+      updated_at = now()
+    WHERE id = $1;
+  `,
+      [prospectId],
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      completed: true,
+      draft: updated.rows[0]!,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}

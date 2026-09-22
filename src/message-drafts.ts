@@ -18,6 +18,8 @@ export type MessageDraft = {
     | "sent";
   send_status: "pending" | "sending" | "sent" | "needs_reconciliation";
   review_notes: string | null;
+  send_error: string | null;
+  reconciliation_at: Date | null;
   sent_message_id: string | null;
   sent_at: Date | null;
   created_at: Date;
