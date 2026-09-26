@@ -1,4 +1,5 @@
 // src/outreach-send.ts
+
 import { db } from "./db.js";
 import type { MessageDraft } from "./message-drafts.js";
 import { validateOutreachSend } from "./outreach-validation.js";
@@ -15,6 +16,32 @@ export type ClaimOutreachResult =
       reason: string;
     };
 
+/**
+ * Safely claims an outreach draft before a send attempt.
+ *
+ * Direct checks in this function:
+ * 1. Does the prospect exist?
+ * 2. Does the draft exist and belong to this prospect?
+ *    - The SQL requires both the draft id and prospect_id to match.
+ * 3. Is send_status still "pending"?
+ *
+ * validateOutreachSend() then checks:
+ * 4. Is this actually an outreach draft?
+ * 5. Is the prospect stage "draft_ready"?
+ * 6. Is the draft approved?
+ * 7. Does the prospect have a contact email?
+ * 8. Is the recipient email valid?
+ * 9. Does the recipient match the prospect contact email?
+ * 10. Does the draft have a Gmail draft ID?
+ * 11. Has the draft already been sent?
+ *
+ * If every check passes:
+ *
+ * pending -> sending
+ *
+ * The database transaction and FOR UPDATE row locks help prevent
+ * two workers from successfully claiming the same draft at once.
+ */
 export async function claimOutreachSend(
   prospectId: string,
   draftId: string,
@@ -22,8 +49,11 @@ export async function claimOutreachSend(
   const client = await db.connect();
 
   try {
+    // Start a database transaction so the claim either fully succeeds
+    // or fully rolls back.
     await client.query("BEGIN");
 
+    // Lock the prospect row while we decide whether this send can be claimed.
     const prospectResult = await client.query<Prospect>(
       `
         SELECT *
@@ -34,6 +64,7 @@ export async function claimOutreachSend(
       [prospectId],
     );
 
+    // Lock the draft row and require it to belong to this prospect.
     const draftResult = await client.query<MessageDraft>(
       `
         SELECT *
@@ -48,40 +79,51 @@ export async function claimOutreachSend(
     const prospect = prospectResult.rows[0];
     const draft = draftResult.rows[0];
 
+    // Check 1: the prospect must exist.
     if (!prospect) {
       await client.query("ROLLBACK");
+
       return {
         claimed: false,
         reason: "Prospect not found.",
       };
     }
 
+    // Check 2: the draft must exist and belong to this prospect.
     if (!draft) {
       await client.query("ROLLBACK");
+
       return {
         claimed: false,
         reason: "Outreach draft not found.",
       };
     }
 
+    // Check 3: only a pending draft may begin a new send attempt.
     if (draft.send_status !== "pending") {
       await client.query("ROLLBACK");
+
       return {
         claimed: false,
         reason: `Draft cannot be claimed. Current send status: ${draft.send_status}`,
       };
     }
 
+    // Run the remaining outreach business-rule checks before
+    // changing the draft into the sending state.
     const validation = validateOutreachSend(prospect, draft);
 
     if (!validation.valid) {
       await client.query("ROLLBACK");
+
       return {
         claimed: false,
         reason: validation.errors.join(" | "),
       };
     }
 
+    // All safety checks passed.
+    // Claim the draft by moving it from pending -> sending.
     const updated = await client.query<MessageDraft>(
       `
         UPDATE message_drafts
@@ -94,6 +136,7 @@ export async function claimOutreachSend(
       [draftId],
     );
 
+    // Make the state change permanent.
     await client.query("COMMIT");
 
     return {
@@ -102,9 +145,11 @@ export async function claimOutreachSend(
       draft: updated.rows[0]!,
     };
   } catch (error) {
+    // If anything unexpected fails, undo the transaction.
     await client.query("ROLLBACK");
     throw error;
   } finally {
+    // Return this dedicated database connection to the pool.
     client.release();
   }
 }
@@ -119,6 +164,27 @@ export type CompleteOutreachResult =
       reason: string;
     };
 
+/**
+ * Finalizes an outreach send only after Gmail has confirmed success.
+ *
+ * Checks:
+ * 1. Does the draft exist and belong to this prospect?
+ * 2. Is the draft currently "sending"?
+ *
+ * If valid:
+ *
+ * draft:
+ * sending -> sent
+ *
+ * prospect:
+ * -> outreach_sent
+ *
+ * The Gmail message ID, Gmail thread ID, and sent timestamp
+ * are stored as part of the successful send record.
+ *
+ * The draft and prospect updates happen inside one transaction,
+ * so they commit together.
+ */
 export async function completeOutreachSend(
   prospectId: string,
   draftId: string,
@@ -130,6 +196,8 @@ export async function completeOutreachSend(
   try {
     await client.query("BEGIN");
 
+    // Lock the draft while completing the send.
+    // The draft must also belong to the supplied prospect.
     const draftResult = await client.query<MessageDraft>(
       `
         SELECT *
@@ -143,6 +211,7 @@ export async function completeOutreachSend(
 
     const draft = draftResult.rows[0];
 
+    // Check 1: the draft must exist and belong to the prospect.
     if (!draft) {
       await client.query("ROLLBACK");
 
@@ -152,6 +221,12 @@ export async function completeOutreachSend(
       };
     }
 
+    // Check 2: only a draft currently being sent may be completed.
+    //
+    // This prevents things like:
+    // pending -> sent
+    // sent -> sent again
+    // needs_reconciliation -> sent automatically
     if (draft.send_status !== "sending") {
       await client.query("ROLLBACK");
 
@@ -161,6 +236,8 @@ export async function completeOutreachSend(
       };
     }
 
+    // Gmail confirmed success.
+    // Store the authoritative send result.
     const updatedDraft = await client.query<MessageDraft>(
       `
         UPDATE message_drafts
@@ -178,6 +255,7 @@ export async function completeOutreachSend(
       [draftId, prospectId, sentMessageId, gmailThreadId],
     );
 
+    // Move the overall prospect workflow forward too.
     await client.query(
       `
         UPDATE prospects
@@ -203,6 +281,31 @@ export async function completeOutreachSend(
   }
 }
 
+/**
+ * Stops automatic processing when Gmail's send result is uncertain.
+ *
+ * An uncertain result does NOT necessarily mean Gmail failed.
+ * It means Relay cannot prove whether Gmail sent the message.
+ *
+ * Checks:
+ * 1. Does the draft exist and belong to this prospect?
+ * 2. Is the draft currently "sending"?
+ *
+ * If valid:
+ *
+ * draft:
+ * sending -> needs_reconciliation
+ *
+ * prospect:
+ * -> send_reconciliation
+ *
+ * Relay also stores:
+ * - the error/reason
+ * - the reconciliation timestamp
+ *
+ * This prevents Relay from blindly retrying an uncertain send
+ * and potentially sending a duplicate email.
+ */
 export async function markOutreachNeedsReconciliation(
   prospectId: string,
   draftId: string,
@@ -213,6 +316,8 @@ export async function markOutreachNeedsReconciliation(
   try {
     await client.query("BEGIN");
 
+    // Lock the draft while moving it into reconciliation.
+    // The draft must belong to the supplied prospect.
     const draftResult = await client.query<MessageDraft>(
       `
         SELECT *
@@ -226,6 +331,7 @@ export async function markOutreachNeedsReconciliation(
 
     const draft = draftResult.rows[0];
 
+    // Check 1: the draft must exist and belong to the prospect.
     if (!draft) {
       await client.query("ROLLBACK");
 
@@ -235,6 +341,7 @@ export async function markOutreachNeedsReconciliation(
       };
     }
 
+    // Check 2: only an active send attempt can become uncertain.
     if (draft.send_status !== "sending") {
       await client.query("ROLLBACK");
 
@@ -244,6 +351,8 @@ export async function markOutreachNeedsReconciliation(
       };
     }
 
+    // The external send outcome is uncertain.
+    // Stop automatic processing and preserve the failure context.
     const updated = await client.query<MessageDraft>(
       `
         UPDATE message_drafts
@@ -259,14 +368,15 @@ export async function markOutreachNeedsReconciliation(
       [draftId, prospectId, reason],
     );
 
+    // Move the prospect into the human-review reconciliation stage.
     await client.query(
       `
-    UPDATE prospects
-    SET
-      stage = 'send_reconciliation',
-      updated_at = now()
-    WHERE id = $1;
-  `,
+        UPDATE prospects
+        SET
+          stage = 'send_reconciliation',
+          updated_at = now()
+        WHERE id = $1;
+      `,
       [prospectId],
     );
 
