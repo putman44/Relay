@@ -7,8 +7,9 @@ import { handleGmailSendResult } from "./handle-gmail-result.js";
 import { claimOutreachSend } from "./outreach-send.js";
 import { getProspectById } from "./prospects.js";
 
-// const prospectId = "03336ca4-c95a-406f-96a3-066fad35e107";
 const gmailDraftId = `TEST_RECONCILIATION_${Date.now()}`;
+let testProspectId: string | null = null;
+let testDraftId: string | null = null;
 
 test("marks an uncertain Gmail send for reconciliation", async () => {
   const prospectInsertResult = await db.query<{ id: string }>(
@@ -36,6 +37,8 @@ test("marks an uncertain Gmail send for reconciliation", async () => {
   assert.ok(createdProspect, "Expected prospect insert to return a row");
 
   const prospectId = createdProspect.id;
+  testProspectId = prospectId;
+
 
   const draftResult = await db.query(
     `
@@ -60,6 +63,7 @@ test("marks an uncertain Gmail send for reconciliation", async () => {
   );
 
   const draftId = draftResult.rows[0].id;
+  testDraftId = draftId;
 
   console.log("Created draft:", draftId);
 
@@ -96,5 +100,32 @@ test("marks an uncertain Gmail send for reconciliation", async () => {
 });
 
 after(async () => {
+  if (testProspectId) {
+    await db.query(
+      `
+        DELETE FROM prospects
+        WHERE id = $1;
+      `,
+      [testProspectId],
+    );
+  }
+
+  if (testDraftId) {
+    const remainingDraft = await db.query(
+      `
+        SELECT id
+        FROM message_drafts
+        WHERE id = $1;
+      `,
+      [testDraftId],
+    );
+
+    assert.equal(
+      remainingDraft.rowCount,
+      0,
+      "Expected draft to be deleted by ON DELETE CASCADE",
+    );
+  }
+
   await db.end();
 });
