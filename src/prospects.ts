@@ -1,5 +1,6 @@
 // src/prospects.ts
 import { db } from "./db.js";
+import type { ProspectStage } from "./prospect-stages.js";
 
 export type Prospect = {
   id: string;
@@ -7,7 +8,7 @@ export type Prospect = {
   website: string | null;
   contact_name: string | null;
   contact_email: string | null;
-  stage: string;
+  stage: ProspectStage;
   created_at: Date;
   updated_at: Date;
 };

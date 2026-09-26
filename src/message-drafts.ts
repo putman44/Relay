@@ -1,22 +1,20 @@
 // src/message-drafts.ts
 import { db } from "./db.js";
+import type { DraftType } from "./draft-types.js";
+import type { ReviewStatus } from "./review-statuses.js";
+import type { SendStatus } from "./send-statuses.js";
 
 export type MessageDraft = {
   id: string;
   prospect_id: string;
-  draft_type: "outreach" | "follow_up" | "response";
+  draft_type: DraftType;
   recipient_email: string;
   subject: string;
   body: string;
   gmail_draft_id: string | null;
   gmail_thread_id: string | null;
-  review_status:
-    | "needs_review"
-    | "approved"
-    | "needs_edit"
-    | "rejected"
-    | "sent";
-  send_status: "pending" | "sending" | "sent" | "needs_reconciliation";
+  review_status: ReviewStatus;
+  send_status: SendStatus;
   review_notes: string | null;
   send_error: string | null;
   reconciliation_at: Date | null;
