@@ -1,25 +1,41 @@
-// src/test-handle-gmail-result.ts
+// src/test-handle-gmail-reconciliation.ts
 import { strict as assert } from "node:assert";
+import { after, test } from "node:test";
 import { db } from "./db.js";
 import { fakeGmailSend } from "./fake-gmail.js";
 import { handleGmailSendResult } from "./handle-gmail-result.js";
 import { claimOutreachSend } from "./outreach-send.js";
 import { getProspectById } from "./prospects.js";
 
-const prospectId = "03336ca4-c95a-406f-96a3-066fad35e107";
-const gmailDraftId = `TEST_SUCCESS_${Date.now()}`;
+// const prospectId = "03336ca4-c95a-406f-96a3-066fad35e107";
+const gmailDraftId = `TEST_RECONCILIATION_${Date.now()}`;
 
-const main = async () => {
-  await db.query(
+test("marks an uncertain Gmail send for reconciliation", async () => {
+  const prospectInsertResult = await db.query<{ id: string }>(
     `
-          UPDATE prospects
-          SET
-            stage = 'draft_ready',
-            updated_at = now()
-          WHERE id = $1;
-        `,
-    [prospectId],
+   INSERT INTO prospects (
+     company_name,
+     website,
+     contact_name,
+     contact_email,
+     stage
+   )
+   VALUES ($1, $2, $3, $4, 'draft_ready')
+   RETURNING id;
+ `,
+    [
+      "Relay Reconciliation Test",
+      "https://devbytaylor.com",
+      "Taylor Putman",
+      "test@devbytaylor.com",
+    ],
   );
+
+  const createdProspect = prospectInsertResult.rows[0];
+
+  assert.ok(createdProspect, "Expected prospect insert to return a row");
+
+  const prospectId = createdProspect.id;
 
   const draftResult = await db.query(
     `
@@ -37,7 +53,7 @@ const main = async () => {
     [
       prospectId,
       "test@devbytaylor.com",
-      "Relay successful send test",
+      "Relay reconciliation test",
       "Controlled development-only reconciliation test.",
       gmailDraftId,
     ],
@@ -53,9 +69,8 @@ const main = async () => {
     throw new Error(`Could not claim draft: ${claim.reason}`);
   }
 
-  const fakeGmailSuccess = await fakeGmailSend(true);
-
-  await handleGmailSendResult(prospectId, draftId, fakeGmailSuccess);
+  const fakeGmailResult = await fakeGmailSend(true);
+  await handleGmailSendResult(prospectId, draftId, fakeGmailResult);
 
   const draftResultAfterSend = await db.query(
     `
@@ -78,12 +93,8 @@ const main = async () => {
 
   console.log("\nFinal draft state:");
   console.log(draftResultAfterSend.rows[0]);
+});
 
+after(async () => {
   await db.end();
-};
-
-main().catch(async (error) => {
-  console.log(error);
-  await db.end();
-  process.exit(1);
 });
