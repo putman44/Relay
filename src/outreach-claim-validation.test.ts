@@ -1,17 +1,15 @@
-// src/test-handle-gmail-success.ts
+// src/outreach-claim-validation.test.ts
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "./db.js";
-import { fakeGmailSend } from "./fake-gmail.js";
-import { handleGmailSendResult } from "./handle-gmail-result.js";
 import { claimOutreachSend } from "./outreach-send.js";
 import { getProspectById } from "./prospects.js";
 
-const gmailDraftId = `TEST_SUCCESS_${Date.now()}`;
+const gmailDraftId = `TEST_UNAPPROVED_${Date.now()}`;
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
-test("marks the draft sent after a confirmed Gmail send", async () => {
+test("rejects an unapproved outreach draft", async () => {
   const prospectInsertResult = await db.query<{ id: string }>(
     `
    INSERT INTO prospects (
@@ -49,7 +47,7 @@ test("marks the draft sent after a confirmed Gmail send", async () => {
             gmail_draft_id,
             review_status
           )
-          VALUES ($1, $2, $3, $4, $5, 'approved')
+          VALUES ($1, $2, $3, $4, $5, 'needs_review')
           RETURNING id;
         `,
     [
@@ -68,41 +66,44 @@ test("marks the draft sent after a confirmed Gmail send", async () => {
 
   const claim = await claimOutreachSend(prospectId, draftId);
 
-  if (!claim.claimed) {
-    throw new Error(`Could not claim draft: ${claim.reason}`);
+  assert.equal(claim.claimed, false);
+
+  if (claim.claimed) {
+    throw new Error("Expected the unapproved draft claim to be rejected.");
   }
 
-  const fakeGmailSuccess = await fakeGmailSend(false);
+  console.log("Claim rejected:", claim.reason);
 
-  await handleGmailSendResult(prospectId, draftId, fakeGmailSuccess);
+  assert.equal(
+    claim.reason,
+    "Draft must be approved. Current review status: needs_review",
+  );
 
-  const draftResultAfterSend = await db.query(
+  const draftResultAfterClaim = await db.query(
     `
     SELECT
       send_status,
+      review_status,
       sent_message_id,
-      gmail_thread_id,
-      sent_at,
-      reconciliation_at
+      sent_at
     FROM message_drafts
     WHERE id = $1;
   `,
     [draftId],
   );
 
-  const finalDraft = draftResultAfterSend.rows[0];
+  const finalDraft = draftResultAfterClaim.rows[0];
+  assert.ok(finalDraft, "Expected draft to still exist");
+
   const prospect = await getProspectById(prospectId);
 
-  assert.equal(prospect?.stage, "outreach_sent");
-  assert.equal(finalDraft.send_status, "sent");
-  assert.equal(finalDraft.sent_message_id, "TEST_MESSAGE_ID");
-  assert.equal(finalDraft.gmail_thread_id, "TEST_THREAD_ID");
-  assert.notEqual(finalDraft.sent_at, null);
-  assert.equal(finalDraft.reconciliation_at, null);
+  assert.equal(prospect?.stage, "draft_ready");
+  assert.equal(finalDraft.send_status, "pending");
+  assert.equal(finalDraft.review_status, "needs_review");
+  assert.equal(finalDraft.sent_message_id, null);
+  assert.equal(finalDraft.sent_at, null);
 
-  console.log("\nAll success assertions passed.");
-  console.log("\nFinal draft state:");
-  console.log(draftResultAfterSend.rows[0]);
+  console.log("\nAll unapproved-draft assertions passed.");
 });
 
 after(async () => {

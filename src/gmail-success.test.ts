@@ -1,4 +1,4 @@
-// src/test-handle-gmail-reconciliation.ts
+// src/gmail-success.test.ts
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "./db.js";
@@ -7,11 +7,11 @@ import { handleGmailSendResult } from "./handle-gmail-result.js";
 import { claimOutreachSend } from "./outreach-send.js";
 import { getProspectById } from "./prospects.js";
 
-const gmailDraftId = `TEST_RECONCILIATION_${Date.now()}`;
+const gmailDraftId = `TEST_SUCCESS_${Date.now()}`;
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
-test("marks an uncertain Gmail send for reconciliation", async () => {
+test("marks the draft sent after a confirmed Gmail send", async () => {
   const prospectInsertResult = await db.query<{ id: string }>(
     `
    INSERT INTO prospects (
@@ -25,7 +25,7 @@ test("marks an uncertain Gmail send for reconciliation", async () => {
    RETURNING id;
  `,
     [
-      "Relay Reconciliation Test",
+      "devbytaylor",
       "https://devbytaylor.com",
       "Taylor Putman",
       "test@devbytaylor.com",
@@ -38,7 +38,6 @@ test("marks an uncertain Gmail send for reconciliation", async () => {
 
   const prospectId = createdProspect.id;
   testProspectId = prospectId;
-
 
   const draftResult = await db.query(
     `
@@ -56,8 +55,8 @@ test("marks an uncertain Gmail send for reconciliation", async () => {
     [
       prospectId,
       "test@devbytaylor.com",
-      "Relay reconciliation test",
-      "Controlled development-only reconciliation test.",
+      "Relay successful send test",
+      "Controlled development-only successful send test.",
       gmailDraftId,
     ],
   );
@@ -73,12 +72,18 @@ test("marks an uncertain Gmail send for reconciliation", async () => {
     throw new Error(`Could not claim draft: ${claim.reason}`);
   }
 
-  const fakeGmailResult = await fakeGmailSend(true);
-  await handleGmailSendResult(prospectId, draftId, fakeGmailResult);
+  const fakeGmailSuccess = await fakeGmailSend(false);
+
+  await handleGmailSendResult(prospectId, draftId, fakeGmailSuccess);
 
   const draftResultAfterSend = await db.query(
     `
-    SELECT send_status, send_error, reconciliation_at
+    SELECT
+      send_status,
+      sent_message_id,
+      gmail_thread_id,
+      sent_at,
+      reconciliation_at
     FROM message_drafts
     WHERE id = $1;
   `,
@@ -88,13 +93,14 @@ test("marks an uncertain Gmail send for reconciliation", async () => {
   const finalDraft = draftResultAfterSend.rows[0];
   const prospect = await getProspectById(prospectId);
 
-  assert.equal(prospect?.stage, "send_reconciliation");
-  assert.equal(finalDraft.send_status, "needs_reconciliation");
-  assert.equal(finalDraft.send_error, "Simulated Gmail timeout");
-  assert.notEqual(finalDraft.reconciliation_at, null);
+  assert.equal(prospect?.stage, "outreach_sent");
+  assert.equal(finalDraft.send_status, "sent");
+  assert.equal(finalDraft.sent_message_id, "TEST_MESSAGE_ID");
+  assert.equal(finalDraft.gmail_thread_id, "TEST_THREAD_ID");
+  assert.notEqual(finalDraft.sent_at, null);
+  assert.equal(finalDraft.reconciliation_at, null);
 
-  console.log("\nAll reconciliation assertions passed.");
-
+  console.log("\nAll success assertions passed.");
   console.log("\nFinal draft state:");
   console.log(draftResultAfterSend.rows[0]);
 });
