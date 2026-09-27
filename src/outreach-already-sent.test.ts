@@ -4,67 +4,22 @@ import { after, test } from "node:test";
 import { db } from "./db.js";
 import { claimOutreachSend } from "./outreach-send.js";
 import { getProspectById } from "./prospects.js";
+import { createTestDraft, createTestProspect } from "./test-helpers.js";
 
-const date = new Date();
-const gmailDraftId = `TEST_GMAIL_ALREADY_SENT_${Date.now()}`;
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
 test("rejects a draft because it was already sent", async () => {
-  const prospectInsertResult = await db.query<{ id: string }>(
-    `
-   INSERT INTO prospects (
-     company_name,
-     website,
-     contact_name,
-     contact_email,
-     stage
-   )
-   VALUES ($1, $2, $3, $4, 'draft_ready')
-   RETURNING id;
- `,
-    [
-      "devbytaylor",
-      "https://devbytaylor.com",
-      "Taylor Putman",
-      "test@devbytaylor.com",
-    ],
-  );
+  const prospectId = await createTestProspect();
 
-  const createdProspect = prospectInsertResult.rows[0];
-
-  assert.ok(createdProspect, "Expected prospect insert to return a row");
-
-  const prospectId = createdProspect.id;
   testProspectId = prospectId;
 
-  const draftResult = await db.query(
-    `
-          INSERT INTO message_drafts (
-            prospect_id,
-            recipient_email,
-            subject,
-            body,
-            gmail_draft_id,
-            review_status,
-            sent_message_id,
-            sent_at
-          )
-          VALUES ($1, $2, $3, $4, $5, 'approved', $6, $7)
-          RETURNING id;
-        `,
-    [
-      prospectId,
-      "test@devbytaylor.com",
-      "Relay already-sent draft test",
-      "Controlled development-only already-sent draft test.",
-      gmailDraftId,
-      "TEST_ALREADY_SENT",
-      date,
-    ],
-  );
+  const draftId = await createTestDraft({
+    prospectId,
+    sentMessageId: "TEST_ALREADY_SENT",
+    sentAt: new Date(),
+  });
 
-  const draftId = draftResult.rows[0].id;
   testDraftId = draftId;
 
   console.log("Created draft:", draftId);
