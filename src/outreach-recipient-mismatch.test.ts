@@ -4,12 +4,12 @@ import { after, test } from "node:test";
 import { db } from "./db.js";
 import { claimOutreachSend } from "./outreach-send.js";
 import { getProspectById } from "./prospects.js";
-import { createTestProspect, createTestDraft } from "./test-helpers.js";
+import { createTestDraft, createTestProspect } from "./test-helpers.js";
 
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
-test("rejects an outreach draft with a mismatched recipient", async () => {
+test("Outreach recipient mismatch: rejects an outreach draft with a mismatched recipient", async () => {
   const prospectId = await createTestProspect();
   testProspectId = prospectId;
 
@@ -20,8 +20,6 @@ test("rejects an outreach draft with a mismatched recipient", async () => {
 
   testDraftId = draftId;
 
-  console.log("Created draft:", draftId);
-
   const claim = await claimOutreachSend(prospectId, draftId);
 
   assert.equal(claim.claimed, false);
@@ -29,8 +27,6 @@ test("rejects an outreach draft with a mismatched recipient", async () => {
   if (claim.claimed) {
     throw new Error("Expected the recipient mismatch claim to be rejected.");
   }
-
-  console.log("Claim rejected:", claim.reason);
 
   assert.equal(
     claim.reason,
@@ -61,7 +57,6 @@ test("rejects an outreach draft with a mismatched recipient", async () => {
   assert.equal(finalDraft.sent_message_id, null);
   assert.equal(finalDraft.sent_at, null);
 
-  console.log("\nAll recipient-mismatch assertions passed.");
 });
 
 after(async () => {

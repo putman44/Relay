@@ -9,7 +9,7 @@ import { createTestDraft, createTestProspect } from "./test-helpers.js";
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
-test("rejects duplicate completion after the draft is already sent", async () => {
+test("Outreach duplicate completion: rejects duplicate completion after the draft is already sent", async () => {
   const prospectId = await createTestProspect();
   testProspectId = prospectId;
 

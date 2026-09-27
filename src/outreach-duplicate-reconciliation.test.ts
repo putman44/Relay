@@ -12,7 +12,7 @@ import { createTestDraft, createTestProspect } from "./test-helpers.js";
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
-test("rejects duplicate reconciliation without mutating the original record", async () => {
+test("Outreach duplicate reconciliation: rejects duplicate reconciliation without mutating the original record", async () => {
   const prospectId = await createTestProspect();
   testProspectId = prospectId;
 

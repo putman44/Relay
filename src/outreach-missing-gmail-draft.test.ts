@@ -9,7 +9,7 @@ import { createTestDraft, createTestProspect } from "./test-helpers.js";
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
-test("rejects an outreach draft without a Gmail draft ID", async () => {
+test("Outreach missing Gmail draft: rejects an outreach draft without a Gmail draft ID", async () => {
   const prospectId = await createTestProspect();
 
   testProspectId = prospectId;
@@ -20,8 +20,6 @@ test("rejects an outreach draft without a Gmail draft ID", async () => {
   });
 
   testDraftId = draftId;
-  console.log("Created draft:", draftId);
-
   const claim = await claimOutreachSend(prospectId, draftId);
 
   assert.equal(claim.claimed, false);
@@ -31,8 +29,6 @@ test("rejects an outreach draft without a Gmail draft ID", async () => {
       "Expected the draft without a Gmail draft ID to be rejected.",
     );
   }
-
-  console.log("Claim rejected:", claim.reason);
 
   assert.equal(claim.reason, "Gmail draft ID is missing.");
 
@@ -60,7 +56,6 @@ test("rejects an outreach draft without a Gmail draft ID", async () => {
   assert.equal(finalDraft.sent_message_id, null);
   assert.equal(finalDraft.sent_at, null);
 
-  console.log("\nAll missing-Gmail-draft assertions passed.");
 });
 
 after(async () => {

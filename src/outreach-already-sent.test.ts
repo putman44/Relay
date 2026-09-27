@@ -9,7 +9,7 @@ import { createTestDraft, createTestProspect } from "./test-helpers.js";
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
-test("rejects a draft because it was already sent", async () => {
+test("Outreach already sent: rejects a draft because it was already sent", async () => {
   const prospectId = await createTestProspect();
 
   testProspectId = prospectId;
@@ -22,8 +22,6 @@ test("rejects a draft because it was already sent", async () => {
 
   testDraftId = draftId;
 
-  console.log("Created draft:", draftId);
-
   const claim = await claimOutreachSend(prospectId, draftId);
 
   assert.equal(claim.claimed, false);
@@ -31,8 +29,6 @@ test("rejects a draft because it was already sent", async () => {
   if (claim.claimed) {
     throw new Error("Expected the already-sent draft claim to be rejected.");
   }
-
-  console.log("Claim rejected:", claim.reason);
 
   assert.equal(claim.reason, "Draft appears to have already been sent.");
 
@@ -60,7 +56,6 @@ test("rejects a draft because it was already sent", async () => {
   assert.equal(finalDraft.review_status, "approved");
   assert.notEqual(finalDraft.sent_at, null);
 
-  console.log("\nAll Gmail already sent assertions passed.");
 });
 
 after(async () => {

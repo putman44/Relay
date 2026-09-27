@@ -4,13 +4,13 @@ import { after, test } from "node:test";
 import { db } from "./db.js";
 import { claimOutreachSend } from "./outreach-send.js";
 import { getProspectById } from "./prospects.js";
-import { createTestProspect, createTestDraft } from "./test-helpers.js";
+import { createTestDraft, createTestProspect } from "./test-helpers.js";
 
 const gmailDraftId = `TEST_UNAPPROVED_${Date.now()}`;
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
-test("rejects an unapproved outreach draft", async () => {
+test("Outreach claim validation: rejects an unapproved outreach draft", async () => {
   const prospectId = await createTestProspect();
   testProspectId = prospectId;
 
@@ -21,8 +21,6 @@ test("rejects an unapproved outreach draft", async () => {
 
   testDraftId = draftId;
 
-  console.log("Created draft:", draftId);
-
   const claim = await claimOutreachSend(prospectId, draftId);
 
   assert.equal(claim.claimed, false);
@@ -30,8 +28,6 @@ test("rejects an unapproved outreach draft", async () => {
   if (claim.claimed) {
     throw new Error("Expected the unapproved draft claim to be rejected.");
   }
-
-  console.log("Claim rejected:", claim.reason);
 
   assert.equal(
     claim.reason,
@@ -62,7 +58,6 @@ test("rejects an unapproved outreach draft", async () => {
   assert.equal(finalDraft.sent_message_id, null);
   assert.equal(finalDraft.sent_at, null);
 
-  console.log("\nAll unapproved-draft assertions passed.");
 });
 
 after(async () => {

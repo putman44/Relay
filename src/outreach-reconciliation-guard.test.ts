@@ -9,7 +9,8 @@ import { createTestDraft, createTestProspect } from "./test-helpers.js";
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
-test("rejects reconciliation when the draft is still pending", async () => {  const prospectId = await createTestProspect();
+test("Outreach reconciliation guard: rejects reconciliation when the draft is still pending", async () => {
+  const prospectId = await createTestProspect();
   testProspectId = prospectId;
 
   const draftId = await createTestDraft({

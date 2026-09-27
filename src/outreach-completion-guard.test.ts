@@ -9,7 +9,7 @@ import { createTestDraft, createTestProspect } from "./test-helpers.js";
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
-test("rejects completion when the draft is still pending", async () => {
+test("Outreach completion guard: rejects completion when the draft is still pending", async () => {
   const prospectId = await createTestProspect();
   testProspectId = prospectId;
 

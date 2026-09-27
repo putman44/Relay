@@ -11,7 +11,7 @@ import { createTestDraft, createTestProspect } from "./test-helpers.js";
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
-test("marks an uncertain Gmail send for reconciliation", async () => {
+test("Gmail reconciliation: marks an uncertain Gmail send for reconciliation", async () => {
   const prospectId = await createTestProspect();
   testProspectId = prospectId;
 
@@ -20,8 +20,6 @@ test("marks an uncertain Gmail send for reconciliation", async () => {
   });
 
   testDraftId = draftId;
-
-  console.log("Created draft:", draftId);
 
   const claim = await claimOutreachSend(prospectId, draftId);
 
@@ -50,10 +48,6 @@ test("marks an uncertain Gmail send for reconciliation", async () => {
   assert.equal(finalDraft.send_error, "Simulated Gmail timeout");
   assert.notEqual(finalDraft.reconciliation_at, null);
 
-  console.log("\nAll reconciliation assertions passed.");
-
-  console.log("\nFinal draft state:");
-  console.log(draftResultAfterSend.rows[0]);
 });
 
 after(async () => {

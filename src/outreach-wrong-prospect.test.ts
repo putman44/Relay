@@ -9,7 +9,7 @@ import { createTestDraft, createTestProspect } from "./test-helpers.js";
 const testProspectIds: string[] = [];
 let testDraftId: string | null = null;
 
-test("rejects an outreach draft when it belongs to a different prospect", async () => {
+test("Outreach wrong prospect: rejects an outreach draft when it belongs to a different prospect", async () => {
   const prospectAId = await createTestProspect();
 
   testProspectIds.push(prospectAId);
@@ -30,8 +30,6 @@ test("rejects an outreach draft when it belongs to a different prospect", async 
 
   testDraftId = draftId;
 
-  console.log("Created draft:", draftId);
-
   const claim = await claimOutreachSend(prospectAId, draftId);
 
   assert.equal(claim.claimed, false);
@@ -41,8 +39,6 @@ test("rejects an outreach draft when it belongs to a different prospect", async 
       "Expected the outreach claim to be rejected because the draft belongs to a different prospect.",
     );
   }
-
-  console.log("Claim rejected:", claim.reason);
 
   assert.equal(claim.reason, "Outreach draft not found.");
 
@@ -72,7 +68,6 @@ test("rejects an outreach draft when it belongs to a different prospect", async 
   assert.equal(finalDraft.sent_message_id, null);
   assert.equal(finalDraft.sent_at, null);
 
-  console.log("\nAll wrong-prospect assertions passed.");
 });
 
 after(async () => {

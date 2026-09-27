@@ -9,7 +9,7 @@ import { createTestDraft, createTestProspect } from "./test-helpers.js";
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
-test("rejects an outreach draft when the prospect is not draft_ready", async () => {
+test("Invalid prospect stage: rejects an outreach draft when the prospect is not draft_ready", async () => {
   const prospectId = await createTestProspect({
     stage: "researching",
   });
@@ -22,8 +22,6 @@ test("rejects an outreach draft when the prospect is not draft_ready", async () 
 
   testDraftId = draftId;
 
-  console.log("Created draft:", draftId);
-
   const claim = await claimOutreachSend(prospectId, draftId);
 
   assert.equal(claim.claimed, false);
@@ -33,8 +31,6 @@ test("rejects an outreach draft when the prospect is not draft_ready", async () 
       "Expected the outreach claim to be rejected while the prospect is researching.",
     );
   }
-
-  console.log("Claim rejected:", claim.reason);
 
   assert.equal(
     claim.reason,
@@ -65,7 +61,6 @@ test("rejects an outreach draft when the prospect is not draft_ready", async () 
   assert.equal(finalDraft.sent_message_id, null);
   assert.equal(finalDraft.sent_at, null);
 
-  console.log("\nAll invalid-stage assertions passed.");
 });
 
 after(async () => {

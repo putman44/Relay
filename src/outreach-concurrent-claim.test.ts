@@ -10,7 +10,7 @@ import { createTestDraft, createTestProspect } from "./test-helpers.js";
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
-test("two workers trying to claim the same draft at the same time.", async () => {
+test("Outreach concurrent claim: allows only one worker to claim the same draft concurrently", async () => {
   const prospectId = await createTestProspect();
   testProspectId = prospectId;
 
@@ -19,15 +19,12 @@ test("two workers trying to claim the same draft at the same time.", async () =>
   });
   testDraftId = draftId;
 
-  console.log("Created draft:", draftId);
-
   const [claimA, claimB] = await Promise.all([
     claimOutreachSend(prospectId, draftId),
     claimOutreachSend(prospectId, draftId),
   ]);
 
   const claims = [claimA, claimB];
-  console.log(claims);
 
   const successfulClaims = claims.filter((claim) => claim.claimed);
   const rejectedClaims = claims.filter((claim) => !claim.claimed);
@@ -63,10 +60,7 @@ test("two workers trying to claim the same draft at the same time.", async () =>
 
   assert.equal(prospect?.stage, "draft_ready");
   assert.equal(finalDraft.send_status, "sending");
-  
-  console.log("\nAll concurrent-claim assertions passed.");
-  console.log("\nFinal draft state:");
-  console.log(draftResultAfterClaims.rows[0]);
+
 });
 
 after(async () => {
