@@ -1,7 +1,7 @@
 // src/get-outreach-context.ts
-import { db } from "./db.js";
-import { getLatestOutreachDraft } from "./message-drafts.js";
-import { getProspectById } from "./prospects.js";
+import { db } from "../src/db.js";
+import { getLatestOutreachDraft } from "../src/message-drafts.js";
+import { getProspectById } from "../src/prospects.js";
 
 const prospectId = "03336ca4-c95a-406f-96a3-066fad35e107";
 

@@ -1,5 +1,5 @@
-import { db } from "./db.js";
-import { listProspects } from "./prospects.js";
+import { db } from "../src/db.js";
+import { listProspects } from "../src/prospects.js";
 
 async function main() {
   const prospects = await listProspects();

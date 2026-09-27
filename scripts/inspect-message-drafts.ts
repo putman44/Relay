@@ -1,5 +1,5 @@
 // src/inspect-message-drafts.ts
-import { db } from "./db.js";
+import { db } from "../src/db.js";
 
 async function main() {
   const result = await db.query(`

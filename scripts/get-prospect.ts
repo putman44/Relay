@@ -1,6 +1,6 @@
 // src/get-prospect.ts
-import { db } from "./db.js";
-import { getProspectById } from "./prospects.js";
+import { db } from "../src/db.js";
+import { getProspectById } from "../src/prospects.js";
 
 const prospectId = "03336ca4-c95a-406f-96a3-066fad35e107";
 
