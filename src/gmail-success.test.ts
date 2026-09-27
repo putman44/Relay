@@ -6,62 +6,19 @@ import { fakeGmailSend } from "./fake-gmail.js";
 import { handleGmailSendResult } from "./handle-gmail-result.js";
 import { claimOutreachSend } from "./outreach-send.js";
 import { getProspectById } from "./prospects.js";
+import { createTestDraft, createTestProspect } from "./test-helpers.js";
 
-const gmailDraftId = `TEST_SUCCESS_${Date.now()}`;
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
 test("marks the draft sent after a confirmed Gmail send", async () => {
-  const prospectInsertResult = await db.query<{ id: string }>(
-    `
-   INSERT INTO prospects (
-     company_name,
-     website,
-     contact_name,
-     contact_email,
-     stage
-   )
-   VALUES ($1, $2, $3, $4, 'draft_ready')
-   RETURNING id;
- `,
-    [
-      "devbytaylor",
-      "https://devbytaylor.com",
-      "Taylor Putman",
-      "test@devbytaylor.com",
-    ],
-  );
-
-  const createdProspect = prospectInsertResult.rows[0];
-
-  assert.ok(createdProspect, "Expected prospect insert to return a row");
-
-  const prospectId = createdProspect.id;
+  const prospectId = await createTestProspect();
   testProspectId = prospectId;
 
-  const draftResult = await db.query(
-    `
-          INSERT INTO message_drafts (
-            prospect_id,
-            recipient_email,
-            subject,
-            body,
-            gmail_draft_id,
-            review_status
-          )
-          VALUES ($1, $2, $3, $4, $5, 'approved')
-          RETURNING id;
-        `,
-    [
-      prospectId,
-      "test@devbytaylor.com",
-      "Relay successful send test",
-      "Controlled development-only successful send test.",
-      gmailDraftId,
-    ],
-  );
+  const draftId = await createTestDraft({
+    prospectId,
+  });
 
-  const draftId = draftResult.rows[0].id;
   testDraftId = draftId;
 
   console.log("Created draft:", draftId);
@@ -91,6 +48,7 @@ test("marks the draft sent after a confirmed Gmail send", async () => {
   );
 
   const finalDraft = draftResultAfterSend.rows[0];
+  assert.ok(finalDraft, "Expected draft to still exist");
   const prospect = await getProspectById(prospectId);
 
   assert.equal(prospect?.stage, "outreach_sent");
