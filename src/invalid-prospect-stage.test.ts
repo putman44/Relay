@@ -4,62 +4,22 @@ import { after, test } from "node:test";
 import { db } from "./db.js";
 import { claimOutreachSend } from "./outreach-send.js";
 import { getProspectById } from "./prospects.js";
+import { createTestDraft, createTestProspect } from "./test-helpers.js";
 
-const gmailDraftId = `TEST_INVALID_STAGE_${Date.now()}`;
 let testProspectId: string | null = null;
 let testDraftId: string | null = null;
 
 test("rejects an outreach draft when the prospect is not draft_ready", async () => {
-  const prospectInsertResult = await db.query<{ id: string }>(
-    `
-   INSERT INTO prospects (
-     company_name,
-     website,
-     contact_name,
-     contact_email,
-     stage
-   )
-   VALUES ($1, $2, $3, $4, 'researching')
-   RETURNING id;
- `,
-    [
-      "devbytaylor",
-      "https://devbytaylor.com",
-      "Taylor Putman",
-      "test@devbytaylor.com",
-    ],
-  );
+  const prospectId = await createTestProspect({
+    stage: "researching",
+  });
 
-  const createdProspect = prospectInsertResult.rows[0];
-
-  assert.ok(createdProspect, "Expected prospect insert to return a row");
-
-  const prospectId = createdProspect.id;
   testProspectId = prospectId;
 
-  const draftResult = await db.query(
-    `
-          INSERT INTO message_drafts (
-            prospect_id,
-            recipient_email,
-            subject,
-            body,
-            gmail_draft_id,
-            review_status
-          )
-          VALUES ($1, $2, $3, $4, $5, 'approved')
-          RETURNING id;
-        `,
-    [
-      prospectId,
-      "test@devbytaylor.com",
-      "Relay prospect in researching stage",
-      "Controlled development-only prospect in researching stage",
-      gmailDraftId,
-    ],
-  );
+  const draftId = await createTestDraft({
+    prospectId,
+  });
 
-  const draftId = draftResult.rows[0].id;
   testDraftId = draftId;
 
   console.log("Created draft:", draftId);
