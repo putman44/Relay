@@ -121,3 +121,30 @@ export const retryOutreachJob = async (
 
   return job;
 };
+
+export const failOutreachJob = async (
+  jobId: string,
+  errorMessage: string,
+): Promise<OutreachJob> => {
+  const result = await db.query<OutreachJob>(
+    `
+    UPDATE outreach_jobs
+    SET
+      status = 'failed',
+      last_error = $2,
+      updated_at = now()
+    WHERE id = $1
+      AND status = 'processing'
+    RETURNING *;
+    `,
+    [jobId, errorMessage],
+  );
+
+  const job = result.rows[0];
+
+  if (!job) {
+    throw new Error("Outreach job is not processing");
+  }
+
+  return job;
+};
