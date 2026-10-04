@@ -38,10 +38,9 @@ export const createOutreachJob = async (
   return job;
 };
 
-export const claimNextOutreachJob =
-  async (): Promise<OutreachJob | null> => {
-    const result = await db.query<OutreachJob>(
-      `
+export const claimNextOutreachJob = async (): Promise<OutreachJob | null> => {
+  const result = await db.query<OutreachJob>(
+    `
       WITH next_job AS (
         SELECT id
         FROM outreach_jobs
@@ -63,7 +62,32 @@ export const claimNextOutreachJob =
       )
       RETURNING *;
       `,
-    );
+  );
 
-    return result.rows[0] ?? null;
-  };
+  return result.rows[0] ?? null;
+};
+
+export const completeOutreachJob = async (
+  jobId: string,
+): Promise<OutreachJob> => {
+  const result = await db.query<OutreachJob>(
+    `
+    UPDATE outreach_jobs
+    SET
+      status = 'completed',
+      updated_at = now()
+    WHERE id = $1
+      AND status = 'processing'
+    RETURNING *;
+    `,
+    [jobId],
+  );
+
+  const job = result.rows[0];
+
+  if (!job) {
+    throw new Error("Outreach job is not processing");
+  }
+
+  return job;
+};
