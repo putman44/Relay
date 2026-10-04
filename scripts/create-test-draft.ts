@@ -1,4 +1,4 @@
-// src/create-test-draft.ts
+// scripts/create-test-draft.ts
 import { db } from "../src/db.js";
 
 const prospectId = "03336ca4-c95a-406f-96a3-066fad35e107";

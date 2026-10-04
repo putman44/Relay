@@ -1,4 +1,4 @@
-// src/run-migration.ts
+// scripts/run-migration.ts
 import "dotenv/config";
 import { readFile } from "node:fs/promises";
 import { Pool } from "pg";

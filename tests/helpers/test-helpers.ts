@@ -1,4 +1,4 @@
-// src/test-helpers.ts
+// tests/helpers/test-helpers.ts
 import { db } from "../../src/db.js";
 import type { ProspectStage } from "../../src/outreach/types/prospect-stages.js";
 import type { ReviewStatus } from "../../src/outreach/types/review-statuses.js";

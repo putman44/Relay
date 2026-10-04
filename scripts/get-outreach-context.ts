@@ -1,4 +1,4 @@
-// src/get-outreach-context.ts
+// scripts/get-outreach-context.ts
 import { db } from "../src/db.js";
 import { getLatestOutreachDraft } from "../src/outreach/message-drafts.js";
 import { getProspectById } from "../src/outreach/prospects.js";

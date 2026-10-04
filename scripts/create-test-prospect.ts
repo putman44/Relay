@@ -1,4 +1,4 @@
-// src/create-test-prospect.ts
+// scripts/create-test-prospect.ts
 import "dotenv/config";
 import { Pool } from "pg";
 

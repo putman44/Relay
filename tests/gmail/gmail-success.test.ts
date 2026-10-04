@@ -1,4 +1,4 @@
-// src/gmail-success.test.ts
+// tests/gmail/gmail-success.test.ts
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "../../src/db.js";

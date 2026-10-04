@@ -1,4 +1,4 @@
-// src/inspect-prospects.ts
+// scripts/inspect-prospects.ts
 import "dotenv/config";
 import { Pool } from "pg";
 

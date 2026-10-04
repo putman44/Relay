@@ -1,4 +1,4 @@
-// src/invalid-prospect-stage.test.ts
+// tests/outreach/invalid-prospect-stage.test.ts
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "../../src/db.js";

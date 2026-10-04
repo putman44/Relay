@@ -1,4 +1,4 @@
-// src/inspect-message-drafts.ts
+// scripts/inspect-message-drafts.ts
 import { db } from "../src/db.js";
 
 async function main() {

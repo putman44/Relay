@@ -1,4 +1,4 @@
-// src/outreach-concurrent-claim.test.ts
+// tests/outreach/outreach-concurrent-claim.test.ts
 
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";

@@ -1,4 +1,4 @@
-// src/get-prospect.ts
+// scripts/get-prospect.ts
 import { db } from "../src/db.js";
 import { getProspectById } from "../src/outreach/prospects.js";
 

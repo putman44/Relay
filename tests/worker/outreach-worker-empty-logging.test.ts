@@ -1,4 +1,4 @@
-// src/outreach-worker-empty-logging.test.ts
+// tests/worker/outreach-worker-empty-logging.test.ts
 
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";

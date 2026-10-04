@@ -1,4 +1,4 @@
-// src/outreach-wrong-prospect.test.ts
+// tests/outreach/outreach-wrong-prospect.test.ts
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "../../src/db.js";

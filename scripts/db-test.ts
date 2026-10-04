@@ -1,4 +1,4 @@
-// src/db-test.ts
+// scripts/db-test.ts
 import "dotenv/config";
 import { Pool } from "pg";
 

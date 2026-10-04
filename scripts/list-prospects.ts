@@ -1,3 +1,4 @@
+// scripts/list-prospects.ts
 import { db } from "../src/db.js";
 import { listProspects } from "../src/outreach/prospects.js";
 

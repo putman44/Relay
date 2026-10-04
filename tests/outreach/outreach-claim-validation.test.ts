@@ -1,4 +1,4 @@
-// src/outreach-claim-validation.test.ts
+// tests/outreach/outreach-claim-validation.test.ts
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "../../src/db.js";

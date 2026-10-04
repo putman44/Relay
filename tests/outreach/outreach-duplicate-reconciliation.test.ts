@@ -1,4 +1,4 @@
-// src/outreach-duplicate-reconciliation.test.ts
+// tests/outreach/outreach-duplicate-reconciliation.test.ts
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "../../src/db.js";
