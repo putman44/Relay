@@ -1,5 +1,6 @@
 // src/jobs/outreach-worker.ts
 
+import { NonRetryableOutreachJobError } from "./non-retryable-job-error.js";
 import {
   claimNextOutreachJob,
   completeOutreachJob,
@@ -56,7 +57,7 @@ export const runOutreachWorkerOnce = async (
 
     return null;
   }
-  
+
   logger?.({
     type: "claimed",
     jobId: job.id,
@@ -78,6 +79,19 @@ export const runOutreachWorkerOnce = async (
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown processing error";
+
+    if (error instanceof NonRetryableOutreachJobError) {
+      const failedJob = await failOutreachJob(job.id, errorMessage);
+
+      logger?.({
+        type: "failed",
+        jobId: failedJob.id,
+        attemptCount: failedJob.attempt_count,
+        error: errorMessage,
+      });
+
+      return failedJob;
+    }
 
     if (job.attempt_count < MAX_ATTEMPTS) {
       const retryAt = new Date(Date.now() + RETRY_DELAY_MS);
