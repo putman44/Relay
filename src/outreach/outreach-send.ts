@@ -1,4 +1,4 @@
-// src/outreach-send.ts
+// src/outreach/outreach-send.ts
 
 import { db } from "../db.js";
 import type { MessageDraft } from "./message-drafts.js";

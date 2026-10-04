@@ -1,4 +1,4 @@
-// src/draft-types.ts
+// src/outreach/types/draft-types.ts
 
 export const DRAFT_TYPES = ["outreach", "follow_up", "response"] as const;
 

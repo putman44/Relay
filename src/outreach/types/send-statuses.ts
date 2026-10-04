@@ -1,4 +1,4 @@
-// src/send-statuses.ts
+// src/outreach/types/send-statuses.ts
 export const SEND_STATUSES = [
   "pending",
   "sending",

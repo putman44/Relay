@@ -1,4 +1,4 @@
-// src/job-statuses.ts
+// src/jobs/job-statuses.ts
 export const JOB_STATUSES = [
   "pending",
   "processing",

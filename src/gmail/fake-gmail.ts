@@ -1,4 +1,4 @@
-// src/fake-gmail.ts
+// src/gmail/fake-gmail.ts
 import type { GmailSendResult } from "./gmail-types.js";
 
 export const fakeGmailSend = async (

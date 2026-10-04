@@ -1,4 +1,4 @@
-// src/outreach-validation.ts
+// src/outreach/outreach-validation.ts
 import type { MessageDraft } from "./message-drafts.js";
 import type { Prospect } from "./prospects.js";
 

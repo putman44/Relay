@@ -1,4 +1,4 @@
-// src/review-statuses.ts
+// src/outreach/types/review-statuses.ts
 
 export const REVIEW_STATUSES = [
   "needs_review",

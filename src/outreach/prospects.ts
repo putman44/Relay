@@ -1,4 +1,4 @@
-// src/prospects.ts
+// src/outreach/prospects.ts
 import { db } from "../db.js";
 import type { ProspectStage } from "./types/prospect-stages.js";
 

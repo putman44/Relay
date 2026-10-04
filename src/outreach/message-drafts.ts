@@ -1,4 +1,4 @@
-// src/message-drafts.ts
+// src/outreach/message-drafts.ts
 import { db } from "../db.js";
 import type { DraftType } from "./types/draft-types.js";
 import type { ReviewStatus } from "./types/review-statuses.js";

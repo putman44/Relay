@@ -1,4 +1,4 @@
-// src/gmail-types.ts
+// src/gmail/gmail-types.ts
 
 // discriminated union
 export type GmailSendResult =

@@ -1,4 +1,4 @@
-// src/prospect-stages.ts
+// src/outreach/types/prospect-stages.ts
 
 export const PROSPECT_STAGES = [
   "researching",

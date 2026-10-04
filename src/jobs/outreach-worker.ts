@@ -1,4 +1,4 @@
-// src/outreach-worker.ts
+// src/jobs/outreach-worker.ts
 
 import {
   claimNextOutreachJob,
