@@ -1,9 +1,9 @@
-// src/handle-gmail-result.ts
-import type { GmailSendResult } from "./gmail-types.js";
+// src/gmail/handle-gmail-result.ts
 import {
   completeOutreachSend,
   markOutreachNeedsReconciliation,
-} from "./outreach-send.js";
+} from "../../src/outreach-send.js";
+import type { GmailSendResult } from "./gmail-types.js";
 
 export const handleGmailSendResult = async (
   prospectId: string,

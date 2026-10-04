@@ -2,8 +2,8 @@
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "../../src/db.js";
-import { fakeGmailSend } from "../../src/fake-gmail.js";
-import { handleGmailSendResult } from "../../src/handle-gmail-result.js";
+import { fakeGmailSend } from "../../src/gmail/fake-gmail.js";
+import { handleGmailSendResult } from "../../src/gmail/handle-gmail-result.js";
 import { claimOutreachSend } from "../../src/outreach-send.js";
 import { getProspectById } from "../../src/prospects.js";
 import {
