@@ -6,7 +6,7 @@ import { db } from "../../src/db.js";
 import {
   completeOutreachJob,
   createOutreachJob,
-} from "../../src/outreach-jobs.js";
+} from "../../src/jobs/outreach-jobs.js";
 import {
   createTestDraft,
   createTestProspect,

@@ -3,11 +3,11 @@
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "../../src/db.js";
-import { type OutreachJob } from "../../src/outreach-jobs.js";
+import { type OutreachJob } from "../../src/jobs/outreach-jobs.js";
 import {
   runOutreachWorkerOnce,
   type OutreachWorkerEvent,
-} from "../../src/outreach-worker.js";
+} from "../../src/jobs/outreach-worker.js";
 
 test("Outreach worker logging: records an empty queue event when no job is available", async () => {
   const processJob = async (_job: OutreachJob): Promise<void> => {};

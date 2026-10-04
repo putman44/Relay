@@ -1,8 +1,8 @@
 // src/message-drafts.ts
-import { db } from "./db.js";
-import type { DraftType } from "./draft-types.js";
-import type { ReviewStatus } from "./review-statuses.js";
-import type { SendStatus } from "./send-statuses.js";
+import { db } from "../db.js";
+import type { DraftType } from "./types/draft-types.js";
+import type { ReviewStatus } from "./types/review-statuses.js";
+import type { SendStatus } from "./types/send-statuses.js";
 
 export type MessageDraft = {
   id: string;

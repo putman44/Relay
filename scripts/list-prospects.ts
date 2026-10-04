@@ -1,5 +1,5 @@
 import { db } from "../src/db.js";
-import { listProspects } from "../src/prospects.js";
+import { listProspects } from "../src/outreach/prospects.js";
 
 async function main() {
   const prospects = await listProspects();

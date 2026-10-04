@@ -2,8 +2,8 @@
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "../../src/db.js";
-import { completeOutreachSend } from "../../src/outreach-send.js";
-import { getProspectById } from "../../src/prospects.js";
+import { completeOutreachSend } from "../../src/outreach/outreach-send.js";
+import { getProspectById } from "../../src/outreach/prospects.js";
 import {
   createTestDraft,
   createTestProspect,

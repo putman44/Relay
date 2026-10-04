@@ -1,6 +1,6 @@
 // src/outreach-jobs.ts
 
-import { db } from "./db.js";
+import { db } from "../db.js";
 import type { JobStatus } from "./job-statuses.js";
 
 export type OutreachJob = {

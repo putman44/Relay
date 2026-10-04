@@ -4,8 +4,8 @@ import { after, test } from "node:test";
 import { db } from "../../src/db.js";
 import { fakeGmailSend } from "../../src/gmail/fake-gmail.js";
 import { handleGmailSendResult } from "../../src/gmail/handle-gmail-result.js";
-import { claimOutreachSend } from "../../src/outreach-send.js";
-import { getProspectById } from "../../src/prospects.js";
+import { claimOutreachSend } from "../../src/outreach/outreach-send.js";
+import { getProspectById } from "../../src/outreach/prospects.js";
 import {
   createTestDraft,
   createTestProspect,

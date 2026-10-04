@@ -1,7 +1,7 @@
 // src/test-helpers.ts
 import { db } from "../../src/db.js";
-import type { ProspectStage } from "../../src/prospect-stages.js";
-import type { ReviewStatus } from "../../src/review-statuses.js";
+import type { ProspectStage } from "../../src/outreach/types/prospect-stages.js";
+import type { ReviewStatus } from "../../src/outreach/types/review-statuses.js";
 
 type CreateTestProspectOptions = {
   companyName?: string;

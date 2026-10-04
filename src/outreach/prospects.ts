@@ -1,6 +1,6 @@
 // src/prospects.ts
-import { db } from "./db.js";
-import type { ProspectStage } from "./prospect-stages.js";
+import { db } from "../db.js";
+import type { ProspectStage } from "./types/prospect-stages.js";
 
 export type Prospect = {
   id: string;

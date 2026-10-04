@@ -7,7 +7,7 @@ import {
   claimNextOutreachJob,
   createOutreachJob,
   findStaleOutreachJobs,
-} from "../../src/outreach-jobs.js";
+} from "../../src/jobs/outreach-jobs.js";
 import {
   createTestDraft,
   createTestProspect,

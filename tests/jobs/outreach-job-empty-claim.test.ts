@@ -2,7 +2,7 @@
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "../../src/db.js";
-import { claimNextOutreachJob } from "../../src/outreach-jobs.js";
+import { claimNextOutreachJob } from "../../src/jobs/outreach-jobs.js";
 
 test("Outreach job empty claim: returns null when no pending job is available", async () => {
   const claimedJob = await claimNextOutreachJob();

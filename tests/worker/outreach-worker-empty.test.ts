@@ -3,8 +3,8 @@
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "../../src/db.js";
-import type { OutreachJob } from "../../src/outreach-jobs.js";
-import { runOutreachWorkerOnce } from "../../src/outreach-worker.js";
+import type { OutreachJob } from "../../src/jobs/outreach-jobs.js";
+import { runOutreachWorkerOnce } from "../../src/jobs/outreach-worker.js";
 
 test("Outreach worker empty queue: returns null without processing a job", async () => {
   let processCallCount = 0;

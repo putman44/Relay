@@ -8,8 +8,8 @@ import {
   createOutreachJob,
   retryOutreachJob,
   type OutreachJob,
-} from "../../src/outreach-jobs.js";
-import { runOutreachWorkerOnce } from "../../src/outreach-worker.js";
+} from "../../src/jobs/outreach-jobs.js";
+import { runOutreachWorkerOnce } from "../../src/jobs/outreach-worker.js";
 import {
   createTestDraft,
   createTestProspect,

@@ -5,8 +5,8 @@ import { db } from "../../src/db.js";
 import {
   claimOutreachSend,
   markOutreachNeedsReconciliation,
-} from "../../src/outreach-send.js";
-import { getProspectById } from "../../src/prospects.js";
+} from "../../src/outreach/outreach-send.js";
+import { getProspectById } from "../../src/outreach/prospects.js";
 import {
   createTestDraft,
   createTestProspect,

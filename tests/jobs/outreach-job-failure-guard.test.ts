@@ -3,7 +3,7 @@
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "../../src/db.js";
-import { createOutreachJob, failOutreachJob } from "../../src/outreach-jobs.js";
+import { createOutreachJob, failOutreachJob } from "../../src/jobs/outreach-jobs.js";
 import {
   createTestDraft,
   createTestProspect,

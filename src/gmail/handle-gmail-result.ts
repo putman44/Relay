@@ -2,7 +2,7 @@
 import {
   completeOutreachSend,
   markOutreachNeedsReconciliation,
-} from "../../src/outreach-send.js";
+} from "../outreach/outreach-send.js";
 import type { GmailSendResult } from "./gmail-types.js";
 
 export const handleGmailSendResult = async (

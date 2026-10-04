@@ -1,6 +1,6 @@
 // src/outreach-send.ts
 
-import { db } from "./db.js";
+import { db } from "../db.js";
 import type { MessageDraft } from "./message-drafts.js";
 import { validateOutreachSend } from "./outreach-validation.js";
 import type { Prospect } from "./prospects.js";

@@ -8,11 +8,11 @@ import {
   createOutreachJob,
   retryOutreachJob,
   type OutreachJob,
-} from "../../src/outreach-jobs.js";
+} from "../../src/jobs/outreach-jobs.js";
 import {
   runOutreachWorkerOnce,
   type OutreachWorkerEvent,
-} from "../../src/outreach-worker.js";
+} from "../../src/jobs/outreach-worker.js";
 import {
   createTestDraft,
   createTestProspect,
