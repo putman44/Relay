@@ -148,3 +148,21 @@ export const failOutreachJob = async (
 
   return job;
 };
+
+export const findStaleOutreachJobs = async (
+  staleBefore: Date,
+): Promise<OutreachJob[]> => {
+  const result = await db.query<OutreachJob>(
+    `
+    SELECT *
+    FROM outreach_jobs
+    WHERE status = 'processing'
+      AND claimed_at IS NOT NULL
+      AND claimed_at < $1
+    ORDER BY claimed_at ASC;
+    `,
+    [staleBefore],
+  );
+
+  return result.rows;
+};
