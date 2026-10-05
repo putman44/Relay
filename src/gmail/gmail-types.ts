@@ -1,5 +1,7 @@
 // src/gmail/gmail-types.ts
 
+import type { CompleteOutreachResult } from "../outreach/outreach-send.js";
+
 // discriminated union
 export type GmailSendResult =
   | {
@@ -11,3 +13,13 @@ export type GmailSendResult =
       status: "uncertain";
       error: string;
     };
+
+export type GmailDraftSender = (
+  gmailDraftId: string,
+) => Promise<GmailSendResult>;
+
+export type GmailResultFinalizer = (
+  prospectId: string,
+  draftId: string,
+  result: GmailSendResult,
+) => Promise<CompleteOutreachResult>;
