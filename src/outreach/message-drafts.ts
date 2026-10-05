@@ -24,6 +24,22 @@ export type MessageDraft = {
   updated_at: Date;
 };
 
+export async function getMessageDraftById(
+  draftId: string,
+): Promise<MessageDraft | null> {
+  const result = await db.query<MessageDraft>(
+    `
+      SELECT *
+      FROM message_drafts
+      WHERE id = $1
+      LIMIT 1;
+    `,
+    [draftId],
+  );
+
+  return result.rows[0] ?? null;
+}
+
 export async function getLatestOutreachDraft(
   prospectId: string,
 ): Promise<MessageDraft | null> {
