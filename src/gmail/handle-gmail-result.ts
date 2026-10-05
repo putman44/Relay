@@ -11,13 +11,13 @@ export const handleGmailSendResult = async (
   result: GmailSendResult,
 ) => {
   if (result.status === "sent") {
-    await completeOutreachSend(
+    return completeOutreachSend(
       prospectId,
       draftId,
       result.messageId,
       result.threadId,
     );
-  } else {
-    await markOutreachNeedsReconciliation(prospectId, draftId, result.error);
   }
+
+  return markOutreachNeedsReconciliation(prospectId, draftId, result.error);
 };

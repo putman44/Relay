@@ -31,7 +31,19 @@ test("Gmail reconciliation: marks an uncertain Gmail send for reconciliation", a
   }
 
   const fakeGmailResult = await fakeGmailSend(true);
-  await handleGmailSendResult(prospectId, draftId, fakeGmailResult);
+
+  const completion = await handleGmailSendResult(
+    prospectId,
+    draftId,
+    fakeGmailResult,
+  );
+
+  if (!completion.completed) {
+    throw new Error(`Expected reconciliation completion: ${completion.reason}`);
+  }
+
+  assert.equal(completion.draft.id, draftId);
+  assert.equal(completion.draft.send_status, "needs_reconciliation");
 
   const draftResultAfterSend = await db.query(
     `

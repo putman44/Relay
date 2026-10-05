@@ -32,8 +32,19 @@ test("Gmail success: marks the draft sent after a confirmed Gmail send", async (
 
   const fakeGmailSuccess = await fakeGmailSend(false);
 
-  await handleGmailSendResult(prospectId, draftId, fakeGmailSuccess);
+  const completion = await handleGmailSendResult(
+    prospectId,
+    draftId,
+    fakeGmailSuccess,
+  );
 
+  if (!completion.completed) {
+    throw new Error(`Expected Gmail completion: ${completion.reason}`);
+  }
+
+  assert.equal(completion.draft.id, draftId);
+  assert.equal(completion.draft.send_status, "sent");
+  
   const draftResultAfterSend = await db.query(
     `
     SELECT
