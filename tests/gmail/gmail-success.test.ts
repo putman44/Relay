@@ -44,7 +44,7 @@ test("Gmail success: marks the draft sent after a confirmed Gmail send", async (
 
   assert.equal(completion.draft.id, draftId);
   assert.equal(completion.draft.send_status, "sent");
-  
+
   const draftResultAfterSend = await db.query(
     `
     SELECT
