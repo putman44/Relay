@@ -166,3 +166,103 @@ export const findStaleOutreachJobs = async (
 
   return result.rows;
 };
+
+export const requeueFailedOutreachJob = async (
+  jobId: string,
+): Promise<OutreachJob> => {
+  const client = await db.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const stateResult = await client.query<
+      OutreachJob & {
+        draft_send_status: string;
+        review_status: string;
+        sent_message_id: string | null;
+        sent_at: Date | null;
+        prospect_stage: string;
+      }
+    >(
+      `
+        SELECT
+          j.*,
+          d.send_status AS draft_send_status,
+          d.review_status,
+          d.sent_message_id,
+          d.sent_at,
+          p.stage AS prospect_stage
+        FROM outreach_jobs j
+        JOIN message_drafts d
+          ON d.id = j.draft_id
+        JOIN prospects p
+          ON p.id = d.prospect_id
+        WHERE j.id = $1
+        FOR UPDATE OF j, d, p;
+      `,
+      [jobId],
+    );
+
+    const state = stateResult.rows[0];
+
+    if (!state) {
+      throw new Error("Outreach job not found");
+    }
+
+    if (state.status !== "failed") {
+      throw new Error(
+        `Outreach job cannot be requeued. Current status: ${state.status}`,
+      );
+    }
+
+    if (state.draft_send_status !== "pending") {
+      throw new Error(
+        `Outreach draft is not safe to requeue. Current send status: ${state.draft_send_status}`,
+      );
+    }
+
+    if (state.review_status !== "approved") {
+      throw new Error("Outreach draft is not approved");
+    }
+
+    if (state.prospect_stage !== "draft_ready") {
+      throw new Error(
+        `Prospect is not ready for outreach. Current stage: ${state.prospect_stage}`,
+      );
+    }
+
+    if (state.sent_message_id || state.sent_at) {
+      throw new Error("Outreach draft already contains confirmed send evidence");
+    }
+
+    const updatedResult = await client.query<OutreachJob>(
+      `
+        UPDATE outreach_jobs
+        SET
+          status = 'pending',
+          available_at = now(),
+          claimed_at = NULL,
+          updated_at = now()
+        WHERE id = $1
+          AND status = 'failed'
+        RETURNING *;
+      `,
+      [jobId],
+    );
+
+    const updatedJob = updatedResult.rows[0];
+
+    if (!updatedJob) {
+      throw new Error("Failed to requeue outreach job");
+    }
+
+    await client.query("COMMIT");
+
+    return updatedJob;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
