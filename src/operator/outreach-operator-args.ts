@@ -22,6 +22,10 @@ export const parseOutreachOperatorArgs = (
 
   if (command === "inspect") {
     if (flag === "--job") {
+      if (args.length > 3) {
+        throw new Error("Unexpected arguments for inspect");
+      }
+
       if (!value || value.startsWith("--")) {
         throw new Error("Missing job ID after --job");
       }
@@ -47,6 +51,10 @@ export const parseOutreachOperatorArgs = (
   }
 
   if (command === "reconcile-not-sent") {
+    if (args.length > 4) {
+      throw new Error("Unexpected arguments for reconcile-not-sent");
+    }
+
     if (!args.includes("--confirm-not-sent")) {
       throw new Error("Missing required --confirm-not-sent");
     }
