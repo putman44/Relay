@@ -10,6 +10,11 @@ export type OutreachOperatorCommand =
       confirmNotSent: true;
     };
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const isUuid = (value: string): boolean => UUID_PATTERN.test(value);
+
 export const parseOutreachOperatorArgs = (
   args: string[],
 ): OutreachOperatorCommand => {
@@ -48,6 +53,10 @@ export const parseOutreachOperatorArgs = (
 
     if (!value || value.startsWith("--")) {
       throw new Error("Missing job ID after --job");
+    }
+
+    if (!isUuid(value)) {
+      throw new Error("Invalid job ID: expected UUID");
     }
 
     return {

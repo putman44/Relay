@@ -1,15 +1,19 @@
 // src/operator/outreach-operator-run.ts
+import type { ReconcileAndRequeueResult } from "../jobs/outreach-reconciliation.js";
 import { parseOutreachOperatorArgs } from "./outreach-operator-args.js";
 import type { OutreachJobInspection } from "./outreach-operator-inspect.js";
 
 export type OutreachOperatorDependencies = {
   inspectJob: (jobId: string) => Promise<OutreachJobInspection | null>;
-
+  reconcileNotSent?: (jobId: string) => Promise<ReconcileAndRequeueResult>;
   inspectQueue: () => Promise<OutreachJobInspection[]>;
 };
 
 export type OutreachOperatorOutput = (
-  value: OutreachJobInspection | OutreachJobInspection[],
+  value:
+    | OutreachJobInspection
+    | OutreachJobInspection[]
+    | ReconcileAndRequeueResult,
 ) => void;
 
 export const runOutreachOperator = async (
@@ -36,5 +40,18 @@ export const runOutreachOperator = async (
     return;
   }
 
-  throw new Error("Reconciliation execution not implemented");
+  if (command.command === "reconcile-not-sent") {
+    if (!dependencies.reconcileNotSent) {
+      throw new Error("Reconciliation execution not implemented");
+    }
+
+    const result = await dependencies.reconcileNotSent(command.jobId);
+
+    if (!result.reconciled) {
+      throw new Error(result.reason);
+    }
+
+    output(result);
+    return;
+  }
 };

@@ -2,6 +2,7 @@
 import "dotenv/config";
 
 import { db } from "../src/db.js";
+import { reconcileAndRequeueOutreachJobAsNotSent } from "../src/jobs/outreach-reconciliation.js";
 import {
   inspectOutreachJob,
   inspectOutreachQueue,
@@ -14,6 +15,7 @@ const main = async (): Promise<void> => {
     {
       inspectJob: inspectOutreachJob,
       inspectQueue: inspectOutreachQueue,
+      reconcileNotSent: reconcileAndRequeueOutreachJobAsNotSent,
     },
     (value) => {
       if (Array.isArray(value)) {

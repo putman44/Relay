@@ -1,11 +1,13 @@
-// tests/operator/outreach-operator-run-reconciliation-blocked.test.ts
+// tests/operator/outreach-operator-run-reconcile-rejected.test.ts
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { runOutreachOperator } from "../../src/operator/outreach-operator-run.js";
 
 const jobId = "11111111-1111-4111-8111-111111111111";
 
-test("Outreach operator runner: blocks reconciliation execution until implemented", async () => {
+test("Outreach operator runner: rejects an unsuccessful reconciliation", async () => {
+  let outputCalled = false;
+
   await assert.rejects(
     () =>
       runOutreachOperator(
@@ -13,13 +15,19 @@ test("Outreach operator runner: blocks reconciliation execution until implemente
         {
           inspectJob: async () => null,
           inspectQueue: async () => [],
+          reconcileNotSent: async () => ({
+            reconciled: false,
+            reason: "Outreach job cannot be reconciled",
+          }),
         },
         () => {
-          throw new Error("Output should not be called");
+          outputCalled = true;
         },
       ),
     {
-      message: "Reconciliation execution not implemented",
+      message: "Outreach job cannot be reconciled",
     },
   );
+
+  assert.equal(outputCalled, false);
 });
