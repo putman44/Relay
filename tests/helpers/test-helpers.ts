@@ -1,4 +1,5 @@
 // tests/helpers/test-helpers.ts
+import { randomUUID } from "node:crypto";
 import { db } from "../../src/db.js";
 import type { ProspectStage } from "../../src/outreach/types/prospect-stages.js";
 import type { ReviewStatus } from "../../src/outreach/types/review-statuses.js";
@@ -57,7 +58,7 @@ export const createTestDraft = async ({
   recipientEmail = "test@devbytaylor.com",
   subject = "Relay test draft",
   body = "Controlled development-only test draft.",
-  gmailDraftId = `TEST_DRAFT_${Date.now()}`,
+  gmailDraftId = `TEST_DRAFT_${randomUUID()}`,
   reviewStatus = "approved",
   sentMessageId = null,
   sentAt = null,
