@@ -1,4 +1,4 @@
-// src/outreach-job-concurrent-claim.test.ts
+// tests/jobs/outreach-job-concurrent-claim.test.ts
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 import { db } from "../../src/db.js";

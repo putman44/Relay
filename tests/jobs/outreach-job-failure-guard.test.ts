@@ -1,4 +1,4 @@
-// src/outreach-job-failure-guard.test.ts
+// tests/jobs/outreach-job-failure-guard.test.ts
 
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
