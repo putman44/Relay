@@ -26,6 +26,10 @@ export const parseOutreachOperatorArgs = (
         throw new Error("Missing job ID after --job");
       }
 
+      if (!isUuid(value)) {
+        throw new Error("Invalid job ID: expected UUID");
+      }
+
       return {
         command: "inspect",
         jobId: value,

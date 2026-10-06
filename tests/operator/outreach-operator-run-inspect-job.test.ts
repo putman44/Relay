@@ -1,13 +1,14 @@
 // tests/operator/outreach-operator-run-inspect-job.test.ts
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-
 import type { OutreachJobInspection } from "../../src/operator/outreach-operator-inspect.js";
 import { runOutreachOperator } from "../../src/operator/outreach-operator-run.js";
 
+const jobId = "11111111-1111-4111-8111-111111111111";
+
 test("Outreach operator runner: inspects the requested job", async () => {
   const inspection: OutreachJobInspection = {
-    jobId: "job-123",
+    jobId: jobId,
     jobStatus: "failed",
     attemptCount: 1,
     lastError: "Test failure",
@@ -31,7 +32,7 @@ test("Outreach operator runner: inspects the requested job", async () => {
   let outputValue: unknown = null;
 
   await runOutreachOperator(
-    ["inspect", "--job", "job-123"],
+    ["inspect", "--job", jobId],
     {
       inspectJob: async (jobId) => {
         inspectedJobId = jobId;
@@ -44,6 +45,6 @@ test("Outreach operator runner: inspects the requested job", async () => {
     },
   );
 
-  assert.equal(inspectedJobId, "job-123");
+  assert.equal(inspectedJobId, jobId);
   assert.deepEqual(outputValue, inspection);
 });
