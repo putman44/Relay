@@ -6,7 +6,8 @@
   "scripts": {
     "test": "tsx --test --test-concurrency=1 tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "worker:outreach": "tsx scripts/run-outreach-worker.ts"
+    "worker:outreach": "tsx scripts/run-outreach-worker.ts",
+    "outreach:operator": "tsx scripts/outreach-operator.ts"
   },
   "keywords": [],
   "author": "",
