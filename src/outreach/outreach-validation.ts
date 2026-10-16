@@ -23,6 +23,7 @@ export function validateOutreachSend(
 ): OutreachValidationResult {
   const errors: string[] = [];
   if (prospect.cold_outreach_blocked) errors.push("Cold outreach is blocked for this prospect.");
+  if (prospect.communication_opted_out) errors.push("Prospect has opted out of contact.");
 
   if (draft.prospect_id !== prospect.id) {
     errors.push("Draft does not belong to this prospect.");

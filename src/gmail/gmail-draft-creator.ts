@@ -4,13 +4,13 @@ export type CreatedGmailDraft = {
   threadId: string;
 };
 
-export type GmailDraftCreator = (raw: string) => Promise<CreatedGmailDraft>;
+export type GmailDraftCreator = (raw: string, threadId?: string) => Promise<CreatedGmailDraft>;
 
 export type GmailDraftCreationApi = {
   users: {
     drafts: {
       create: (
-        request: { userId: string; requestBody: { message: { raw: string } } },
+        request: { userId: string; requestBody: { message: { raw: string; threadId?: string } } },
         options: { retry: false },
       ) => Promise<{
         data: {
@@ -24,9 +24,9 @@ export type GmailDraftCreationApi = {
 
 export const createGmailDraftCreator = (
   api: GmailDraftCreationApi,
-): GmailDraftCreator => async (raw) => {
+): GmailDraftCreator => async (raw, threadId) => {
   const { data } = await api.users.drafts.create(
-    { userId: "me", requestBody: { message: { raw } } },
+    { userId: "me", requestBody: { message: { raw, ...(threadId ? { threadId } : {}) } } },
     { retry: false },
   );
   if (!data.id?.trim() || !data.message?.id?.trim() || !data.message.threadId?.trim()) {

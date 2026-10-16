@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { GmailThreadUnavailableError, type GmailThread, type GmailThreadReader } from '../gmail/gmail-thread-reader.js';
+import { invalidateStaleResponseDrafts } from './response-draft-invalidation.js';
 
 export type InboundReply = {
   messageId: string; threadId: string; receivedAt: Date;
@@ -82,6 +83,11 @@ export async function monitorReplies(database: Pool, readThread: GmailThreadRead
         await client.query(`UPDATE prospects SET cold_outreach_blocked = true,
           stage = CASE WHEN stage = 'send_reconciliation' OR $2 = false THEN stage ELSE 'replied' END,
           updated_at = now() WHERE id = $1`, [target.prospect_id, replies.length > 0]);
+      }
+      if (replies.length) {
+        const latest = (await client.query(`SELECT gmail_message_id FROM prospect_replies
+          WHERE prospect_id=$1 ORDER BY received_at DESC,gmail_message_id DESC LIMIT 1`, [target.prospect_id])).rows[0];
+        await invalidateStaleResponseDrafts(client, target.prospect_id, latest.gmail_message_id);
       }
       await client.query(`INSERT INTO reply_thread_checks (draft_id, status) VALUES ($1,$2)
         ON CONFLICT (draft_id) DO UPDATE SET status = CASE

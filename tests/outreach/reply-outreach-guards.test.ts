@@ -6,6 +6,14 @@ import { queueApprovedOutreachDraft } from '../../src/outreach/outreach-review-a
 import { createTestDraft, createTestProspect } from '../helpers/test-helpers.js';
 
 after(async () => { await db.end(); });
+test('Reply guards: opt-out independently blocks queue and claim when cold flags are reset', async t => {
+  const prospect = await createTestProspect();
+  t.after(async () => { await db.query('DELETE FROM prospects WHERE id=$1', [prospect]); });
+  const draft = await createTestDraft({ prospectId: prospect });
+  await db.query('UPDATE prospects SET communication_opted_out=true,cold_outreach_blocked=false WHERE id=$1', [prospect]);
+  assert.equal((await queueApprovedOutreachDraft(prospect, draft)).queued, false);
+  assert.equal((await claimOutreachSend(prospect, draft)).claimed, false);
+});
 test('Reply guards: durable suppression prevents queue and claim even after a stage reset', async t => {
   const prospect = await createTestProspect();
   t.after(async () => { await db.query('DELETE FROM prospects WHERE id=$1', [prospect]); });

@@ -43,6 +43,7 @@ export const queueApprovedOutreachDraft = async (
         AND d.send_status = 'pending'
         AND p.stage = 'draft_ready'
         AND NOT p.cold_outreach_blocked
+        AND NOT p.communication_opted_out
         AND NOT EXISTS (SELECT 1 FROM prospect_replies r WHERE r.prospect_id = p.id)
         AND NOT EXISTS (SELECT 1 FROM message_drafts prior
           JOIN reply_thread_checks c ON c.draft_id = prior.id

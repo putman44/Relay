@@ -1,7 +1,7 @@
 # Relay Testing & Worker Guide
 
 **Project:** Relay
-**Current test checkpoint:** 189/189 full regression tests passed on disposable local Postgres (October 16, 2026). After the final archived-message handling adjustment and its additional test, all 20 reply-monitor tests passed in a focused rerun. Typecheck passed. No live Gmail operations were performed.
+**Current test checkpoint:** 219/219 full regression tests passed on disposable local Postgres (October 16, 2026). A final 51-test reply-processing/monitoring subset, including the additional CLI and creation-race tests, passed with no skips. Typecheck and whitespace checks passed. No live Gmail or OpenAI operations were performed.
 **Purpose:** Explain what the tests protect, how the queue/worker system fits together, and what to do when adding new behavior.
 
 ---
@@ -996,3 +996,27 @@ Production migration, Gmail acceptance, and scheduling remain pending.
 | `tests/outreach/reply-monitor.test.ts` | Exact sent-message anchor, fast/same-millisecond replies, archived/automatic messages, malformed thread rejection |
 | `tests/outreach/reply-monitor-database.test.ts` | Disposable-schema migrations, idempotent/concurrent polling, persistent unavailable state, retries, bounded polling, stale-read rollback, preserved reconciliation |
 | `tests/outreach/reply-outreach-guards.test.ts` | Reply evidence and persistent suppression block queue/claim, unhealthy checks block sends, late finalization preserves replies |
+
+## Reply classification and response drafting
+
+The third slice in [Relay Migration Plan](Relay_Migration_Plan.md) documents
+migration 009, required private provider settings, the explicit `reply:process`
+command, supported MIME/routing boundaries, and durable failure inspection.
+The command may create a Gmail response draft but never approves, queues, or
+sends it. Live acceptance and a managed response approval/send pipeline remain
+pending. Existing outreach commands do not accept response drafts.
+
+| Test file | Coverage |
+| --- | --- |
+| `tests/gmail/gmail-message-reader.test.ts` | Exact raw message reads and explicit-thread draft creation without retries |
+| `tests/outreach/reply-classification.test.ts` | Same object/string validation, required fields, enums, limits, safe no-draft/action decisions |
+| `tests/outreach/reply-context.test.ts` | Full-body MIME extraction, sender/routing checks, exact parent headers, preserved plain signature, opt-out/automatic flags, no attachment/snippet fallback |
+| `tests/outreach/openai-reply-classifier.test.ts` | Strict request schema, isolated untrusted input, no tools, disabled response storage, timeout, refused/incomplete/invalid output and transport failures |
+| `tests/outreach/process-reply.test.ts` | Disposable-schema journal migrations, concurrency/duplicates, opt-outs/OOO, stale state, uncertain creation, changed contacts, DB outage/conflict/lost acknowledgement, revoked stale approval |
+| `tests/outreach/reply-process-cli.test.ts` | Missing intent, malformed IDs, and unexpected arguments reject before provider/database use |
+
+Run new integration tests only with `RELAY_DRAFT_TEST_DATABASE_URL` set to a
+disposable direct Postgres connection. The response tests create/drop a unique
+schema, apply all migrations, and inject fake Gmail/classification providers.
+The full suite still also needs `DATABASE_URL` pointed at that disposable
+database. Never use the application database to run migration-based tests.

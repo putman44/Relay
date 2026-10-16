@@ -12,7 +12,7 @@ Postgres and an operator UI remains an explicit product decision.
 | ---: | --- | --- |
 | 1 | Outreach drafting through approved sending | Durable draft creation and actual-draft MIME preflight implemented with fake-Gmail verification; existing approval, queue, send, and reconciliation core retained. Deployment and controlled external acceptance remain |
 | 2 | Reply monitoring | Implemented locally: full-thread reading, durable inbound identities, cold-outreach suppression, bounded polling, and unavailable-thread handling. External acceptance and scheduling remain |
-| 3 | Classification and response drafts | Pending: validate AI outputs, bind each draft to an exact inbound reply, invalidate stale drafts, preserve human approval, and handle opt-outs/OOO |
+| 3 | Classification and response drafts | Implemented locally: validated classification, exact-reply-bound review drafts, stale approval invalidation, opt-out/automatic-message safety, and durable creation journals. External acceptance and managed response approval/send remain |
 | 4 | Follow-up drafting and sending | Pending: local calendar dates, two-touch cap, newer-inbound preflight, explicit approval, durable claims, and uncertain-send recovery |
 | 5 | Prospect research | Pending: OpenAI/Firecrawl, validated output schema, Drive briefs, missing-contact handling, durable artifact creation and resume/recovery |
 | 6 | Client onboarding | Pending: client identity, onboarding/task uniqueness, safe retries, and exact expected-task reconciliation |
@@ -163,7 +163,8 @@ direct connection URL before `npm test`. Existing tests use `DATABASE_URL`.
 Apply `008_create_reply_monitor.sql` before deploying this code, including the
 updated sender and operator. It adds a `replied` stage, a persistent
 `cold_outreach_blocked` flag, `prospect_replies`, and `reply_thread_checks`.
-Migration 008 has not been applied to the application database or droplet.
+Migrations 008 and 009 have not been applied to the application database or droplet.
+The updated monitor also requires 009 for stale response-draft invalidation.
 
 The separate, explicitly invoked command is:
 
@@ -227,3 +228,119 @@ disposable localhost Postgres. After the final archived-message handling change
 and its additional regression test, the 20-test reply-monitor subset passed
 again. Typecheck and whitespace checks passed. No application/droplet migrations,
 Gmail requests, outreach sends, or production worker invocations occurred.
+
+## Third slice: classification and review-only response drafts
+
+Apply `009_create_reply_processing.sql` before deploying this version of the
+monitor, operator, sender, or reply processor. This adds the opt-out flag,
+reply-bound response drafts, and durable `reply_processing_requests`. Each
+prospect/reply pair has one unique processing reservation. Classification records
+and newly created response drafts remain `needs_review`. This is not a response
+send pipeline: no approval, queue, or send operation is invoked, and the existing
+outreach worker/operator rejects response draft types.
+
+The explicit command is:
+
+```bash
+npm run reply:process -- --prospect <existing-prospect-UUID> --confirm-create-response-draft
+```
+
+Replace the UUID before running. The flag authorizes processing that prospect's
+latest recorded reply, including reading Gmail, sharing full reply/original
+outreach text with OpenAI, writing classification state, and potentially creating
+a Gmail response draft. It does not authorize sending mail. Run reply monitoring
+first. The command has not been run against a real mailbox or provider.
+It is not scheduled or included in the read-only Docker monitor.
+
+Configuration requires existing database/Gmail OAuth settings plus private
+`OPENAI_API_KEY` and an explicitly chosen `RELAY_REPLY_MODEL` that supports the
+Responses API and strict structured outputs. No default model or account access
+is assumed; model/scopes/credentials acceptance remains pending. Never commit
+keys or real prospect input files. The provider adapter uses a fixed HTTPS
+endpoint, no tools, `store: false`, a 45-second timeout, and no automatic retries.
+`store: false` is not a promise of zero provider-side retention; review the
+provider's data terms before processing real mail.
+
+The adapter follows [official OpenAI structured-output guidance](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses).
+Every object or JSON string follows the same local required-key/type/enum/size
+validation. Refusals, incomplete responses, extra fields, invalid JSON,
+contradictory actions, and low-confidence draft requests fail before Gmail
+creation. Email/company content is untrusted input, not instructions or tool
+authority. Schema validity does not establish semantic correctness; human review
+of every proposed response remains essential.
+
+Supported classes preserve the n8n intent: Interested, Scheduling Intent,
+Question / Objection, Referral / Wrong Contact, Not Interested, Out of Office,
+and Unclear, with an explicit Opt Out class. Only the first three may draft, at
+High/Medium confidence. Referral messages never automatically choose a new
+contact or create a third-party response. All no-draft decisions have empty
+response copy and no Gmail draft reference. Out-of-office decisions do not
+schedule future contact in this slice.
+
+Common explicit opt-out phrases (including quoted copy) trigger a conservative
+local stop before AI, and automatic-message headers trigger manual review with
+no draft. Model-classified Opt Out also persists `communication_opted_out`.
+That flag independently blocks outreach queueing/claims and future response
+creation, even after stage/cold-flag changes. There is no automatic opt-in or
+unblock operation. Phrase matching is deliberately conservative, not a complete
+natural-language detector or a compliance certification; review opt-out meaning
+and false positives manually. All inbound replies already block cold outreach.
+
+The exact inbound Gmail ID is fetched as raw MIME. Full plain text is required;
+there is no snippet fallback or attachment/HTML-only ingestion. Ambiguous sender
+or Reply-To, a destination different from the known contact, missing/unsafe RFC
+Message-ID, oversized content, or attachment-bearing messages stop for manual
+review. From/Reply-To matching is not cryptographic sender authentication.
+Responses retain the reply subject and parent identity and provide an explicit
+thread ID, following [Gmail's threading requirements](https://developers.google.com/workspace/gmail/api/guides/threads).
+The body preserves the model's proposed plain text and appends the authored
+n8n plain-text signature unchanged. The legacy HTML template is not migrated;
+this slice deliberately creates plain-text drafts compatible with strict MIME
+inspection. Review both proposed copy and signature before any later approval.
+
+Before AI and around creation, live thread checks require the selected reply to
+still be latest. Database transactions recheck latest reply, contact, opt-out,
+and send-reconciliation state under the prospect lock. A durable `creating`
+reservation precedes the Gmail POST, whose transport retries are disabled. New
+replies seen during creation withhold a locally reviewable response and retain
+returned IDs for reconciliation. Incoming mail cannot be atomically synchronized
+with Gmail draft creation: stale drafts can still appear in Gmail, so review
+them manually. No mailbox drafts are deleted by this implementation.
+
+The monitor revokes approval on older unsent/pending response drafts, marks their
+processing records stale, and preserves their Gmail IDs. A superseded `creating`
+request becomes reconciliation-required. Sending, uncertain, and confirmed-send
+draft evidence is never reset. No-draft processing does not reuse an older
+response reference. A future response-send pipeline must check exact latest
+reply identity and approved MIME again immediately before sending; it cannot
+rely on an old classification or polling result.
+
+Any provider/read/validation failure leaves a durable failed reservation rather
+than automatically rerunning the same reply. An uncertain Gmail create, wrong
+thread, or failed finalization records `needs_reconciliation` and returned IDs
+where possible. A database outage can leave `creating`, which also blocks a
+duplicate attempt. A lost database commit acknowledgement can report an error
+even when the request is already `created`; inspect both tables. Never delete
+request/reply history or generate a new ID to bypass these protections.
+
+Read-only recovery inspection:
+
+```sql
+SELECT id, prospect_id, source_reply_message_id, status, review_status,
+       gmail_draft_id, gmail_message_id, gmail_thread_id, last_error
+FROM reply_processing_requests
+ORDER BY created_at DESC;
+```
+
+No automatic recovery/reset command is provided. No production migration, live
+provider evaluation, Gmail acceptance, scheduling, or managed response
+approval/send has been performed. Retain the disabled n8n exports until these
+remaining acceptance/feature boundaries are deliberately resolved.
+
+Verification on October 16, 2026: 219/219 full regression tests passed on
+disposable localhost Postgres. A final 51-test reply-processing/monitoring subset
+also passed, including the additional CLI and in-progress-creation race tests.
+Typecheck and whitespace checks passed. All Gmail/classification providers were
+simulated; no real drafts, emails, or OpenAI requests were made. Migration 009
+was applied only to disposable local test databases, which were removed after
+verification. The step-3 changes remain uncommitted pending review.

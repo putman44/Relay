@@ -10,6 +10,7 @@
     "worker:outreach": "tsx scripts/run-outreach-worker.ts",
     "monitor:outreach": "tsx scripts/monitor-outreach.ts",
     "monitor:replies": "tsx scripts/monitor-replies.ts",
+    "reply:process": "tsx scripts/process-reply.ts",
     "outreach:operator": "tsx scripts/outreach-operator.ts"
   },
   "keywords": [],
