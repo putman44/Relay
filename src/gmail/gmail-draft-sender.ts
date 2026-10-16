@@ -9,8 +9,9 @@ export type GmailDraftApi = {
         userId: string;
         requestBody: {
           id: string;
+          message?: { raw: string; threadId: string };
         };
-      }) => Promise<{
+      }, options?: { retry: false }) => Promise<{
         data: {
           id?: string | null;
           threadId?: string | null;
@@ -22,14 +23,19 @@ export type GmailDraftApi = {
 
 export const createGmailDraftSender = (
   gmailApi: GmailDraftApi,
+  verifiedMessage?: { raw: string; threadId: string },
 ): GmailDraftSender => {
   return async (gmailDraftId) => {
-    const response = await gmailApi.users.drafts.send({
-      userId: "me",
-      requestBody: {
-        id: gmailDraftId,
+    const response = await gmailApi.users.drafts.send(
+      {
+        userId: "me",
+        requestBody: {
+          id: gmailDraftId,
+          ...(verifiedMessage ? { message: verifiedMessage } : {}),
+        },
       },
-    });
+      { retry: false },
+    );
 
     const messageId = response.data.id;
     const threadId = response.data.threadId;

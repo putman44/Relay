@@ -16,7 +16,15 @@ export type GmailSendResult =
 
 export type GmailDraftSender = (
   gmailDraftId: string,
+  approvedDraft?: ApprovedGmailDraft,
 ) => Promise<GmailSendResult>;
+
+export type ApprovedGmailDraft = {
+  recipientEmail: string;
+  subject: string;
+  body: string;
+  threadId: string | null;
+};
 
 export type GmailResultFinalizer = (
   prospectId: string,

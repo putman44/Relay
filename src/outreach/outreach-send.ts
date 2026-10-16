@@ -5,6 +5,23 @@ import type { MessageDraft } from "./message-drafts.js";
 import { validateOutreachSend } from "./outreach-validation.js";
 import type { Prospect } from "./prospects.js";
 
+export async function blockOutreachAfterPreflight(
+  prospectId: string,
+  draftId: string,
+  reason: string,
+): Promise<boolean> {
+  const result = await db.query(
+    `UPDATE message_drafts SET review_status = 'needs_edit', send_status = 'pending',
+       send_error = $3, updated_at = now()
+     WHERE id = $2 AND prospect_id = $1 AND draft_type = 'outreach'
+       AND send_status = 'sending' AND review_status = 'approved'
+       AND sent_at IS NULL AND sent_message_id IS NULL
+     RETURNING id`,
+    [prospectId, draftId, reason],
+  );
+  return result.rowCount === 1;
+}
+
 export type ClaimOutreachResult =
   | {
       claimed: true;

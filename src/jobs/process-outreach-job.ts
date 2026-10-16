@@ -7,12 +7,14 @@ import type {
 } from "../gmail/gmail-types.js";
 import { handleGmailSendResult } from "../gmail/handle-gmail-result.js";
 import {
+  blockOutreachAfterPreflight,
   claimOutreachSend,
   type CompleteOutreachResult,
 } from "../outreach/outreach-send.js";
 import { NonRetryableOutreachJobError } from "./non-retryable-job-error.js";
 import type { OutreachJob } from "./outreach-jobs.js";
 import { resolveOutreachJobDraft } from "./resolve-outreach-job-draft.js";
+import { GmailPreflightError } from "../gmail/gmail-preflight-error.js";
 
 export async function processOutreachJob(
   job: OutreachJob,
@@ -38,9 +40,25 @@ export async function processOutreachJob(
   let gmailResult: GmailSendResult;
 
   try {
-    gmailResult = await sendDraft(gmailDraftId);
+    gmailResult = await sendDraft(gmailDraftId, {
+      recipientEmail: claim.draft.recipient_email,
+      subject: claim.draft.subject,
+      body: claim.draft.body,
+      threadId: claim.draft.gmail_thread_id,
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+
+    if (error instanceof GmailPreflightError) {
+      let blocked = false;
+      try {
+        blocked = await blockOutreachAfterPreflight(claim.draft.prospect_id, claim.draft.id, errorMessage);
+      } catch {
+        throw new NonRetryableOutreachJobError("Preflight stopped before sending, but the database could not record the review block.");
+      }
+      if (!blocked) throw new NonRetryableOutreachJobError("Preflight stopped before sending, but the draft state could not be blocked for review.");
+      throw new NonRetryableOutreachJobError(errorMessage);
+    }
 
     let reconciliation: CompleteOutreachResult;
 

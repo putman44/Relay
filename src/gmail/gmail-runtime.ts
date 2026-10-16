@@ -6,8 +6,17 @@ import {
   loadGmailCredentials,
   type GmailEnvironment,
 } from "./gmail-auth.js";
-import { createGmailDraftSender } from "./gmail-draft-sender.js";
+import { createVerifiedGmailDraftSender } from "./gmail-verified-draft-sender.js";
 import type { GmailDraftSender } from "./gmail-types.js";
+import { createGmailDraftCreator, type GmailDraftCreator } from "./gmail-draft-creator.js";
+
+export function createProductionGmailDraftCreator(
+  environment: GmailEnvironment = process.env,
+): GmailDraftCreator {
+  const credentials = loadGmailCredentials(environment);
+  const oauthClient = createGmailOAuthClient(credentials);
+  return createGmailDraftCreator(createGmailApi(oauthClient));
+}
 
 export function createProductionGmailDraftSender(
   environment: GmailEnvironment = process.env,
@@ -16,5 +25,5 @@ export function createProductionGmailDraftSender(
   const oauthClient = createGmailOAuthClient(credentials);
   const gmailApi = createGmailApi(oauthClient);
 
-  return createGmailDraftSender(gmailApi);
+  return createVerifiedGmailDraftSender(gmailApi);
 }

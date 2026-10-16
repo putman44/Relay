@@ -1,7 +1,7 @@
 # Relay Testing & Worker Guide
 
 **Project:** Relay
-**Current test checkpoint:** 139 tests passing, 0 failing (verified October 16, 2026)
+**Current test checkpoint:** 170/170 full regression tests passed on disposable local Postgres, including actual-draft preflight and draft creation (verified October 16, 2026). The final preflight/state-preservation changes also passed a focused rerun.
 **Purpose:** Explain what the tests protect, how the queue/worker system fits together, and what to do when adding new behavior.
 
 ---
@@ -941,7 +941,7 @@ reconciliation resolved -> same failed job requeued
 
 ## Recommended mental model
 
-If the number of tests starts feeling overwhelming, do not memorize all 139.
+If the number of tests starts feeling overwhelming, do not memorize every test.
 
 Remember the layers:
 
@@ -958,3 +958,26 @@ Remember the layers:
 ```
 
 Every test belongs to one of those buckets.
+
+## Outreach draft creation migration
+
+The supplied-copy draft creation path and its durable recovery boundary are
+documented in [Relay Migration Plan](Relay_Migration_Plan.md). The new command
+creates Gmail drafts only after explicit invocation; it does not approve, queue,
+or send them. Its integration tests use a separately configured disposable
+database and fake Gmail. See that plan for the required migration, command, and
+test setup.
+
+The production sender also performs actual-draft MIME preflight against the
+approved recipient, subject, body, and stored thread before sending. Rejections
+stop the job and set the draft to `needs_edit` / `pending`; failures after send
+invocation retain the existing reconciliation behavior. HTML/multipart content
+and attachments currently block review rather than passing a text-only check.
+
+| Test file | Coverage |
+| --- | --- |
+| `tests/gmail/gmail-draft-creator.test.ts` | Exact create request, disabled transport retries, incomplete results, uncertain errors |
+| `tests/outreach/outreach-draft-content.test.ts` | UTF-8 MIME round trip, header folding, injection and input rejection, explicit CLI confirmation |
+| `tests/outreach/outreach-draft-creation.test.ts` | Isolated-schema migration, reservation before Gmail, concurrent attempts, review-only success, uncertain results, contact edits, finalization failure, DB outage, existing/interrupted requests |
+| `tests/gmail/gmail-draft-preflight.test.ts` | MIME decoding, IDs/labels/thread, recipient/header injection, changed copy, unsupported formats, verified send snapshot, and send-failure classification |
+| `tests/jobs/process-outreach-job-preflight.test.ts` | Review block and terminal job state, approved-content handoff, preservation of confirmed-send evidence, and changed-state persistence rejection |
