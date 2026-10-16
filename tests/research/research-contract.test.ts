@@ -84,6 +84,9 @@ test('OpenAI research adapter is tool-free and requires one completed text resul
       assert.equal(payload.store, false);
       assert.equal(payload.model, 'chosen-model');
       assert.equal(payload.text.format.strict, true);
+      assert.deepEqual(payload.text.format.schema.properties.companyName.enum, [input.company_name]);
+      assert.deepEqual(payload.text.format.schema.properties.website.enum, [root]);
+      assert.deepEqual(payload.text.format.schema.properties.domain.enum, ['business.example.com']);
       return { ok: true, text: async () => JSON.stringify({ status: 'completed', output: [{ type: 'message',
         role: 'assistant', content: [{ type: 'output_text', text: JSON.stringify(result) }] }] }) };
     });

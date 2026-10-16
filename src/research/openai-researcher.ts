@@ -1,5 +1,5 @@
 import { researchResultSchema } from './research-result.js';
-import type { ResearchEvidence } from './research-evidence.js';
+import { safeResearchUrl, type ResearchEvidence } from './research-evidence.js';
 
 export type ResearchInput = { company_name: string; website: string; industry: string | null;
   contact_email: string | null; contact_name: string | null; primary_discovery_question: string | null };
@@ -11,6 +11,15 @@ export function createOpenAIResearcher(environment: { OPENAI_API_KEY?: string; R
   const key = environment.OPENAI_API_KEY?.trim(), model = environment.RELAY_RESEARCH_MODEL?.trim();
   if (!key || !model) throw new Error('OPENAI_API_KEY and explicit RELAY_RESEARCH_MODEL are required.');
   return async (input, evidence) => {
+    const website = safeResearchUrl(input.website);
+    const exactString = (value: string) => ({ type: 'string', enum: [value] });
+    const schema = { ...researchResultSchema, properties: { ...researchResultSchema.properties,
+      companyName: exactString(input.company_name), website: exactString(website),
+      domain: exactString(new URL(website).hostname),
+      ...(input.industry ? { industry: exactString(input.industry) } : {}),
+      ...(input.primary_discovery_question
+        ? { primaryDiscoveryQuestion: exactString(input.primary_discovery_question) } : {}),
+    } };
     const content = JSON.stringify({ input, evidence });
     if (Buffer.byteLength(content) > 180000) throw new Error('Research input is too large.');
     const response = await transport('https://api.openai.com/v1/responses', {
@@ -26,7 +35,7 @@ export function createOpenAIResearcher(environment: { OPENAI_API_KEY?: string; R
           + 'Do not lead the outreach with AI or tools. Ask one operational question. No signature; the application adds it. '
           + 'Use A, B, or C fit conservatively. Return only the exact schema.',
         input: [{ role: 'user', content }],
-        text: { format: { type: 'json_schema', name: 'relay_prospect_research', strict: true, schema: researchResultSchema } },
+        text: { format: { type: 'json_schema', name: 'relay_prospect_research', strict: true, schema } },
       }),
     });
     if (!response.ok) throw new Error('Research model rejected the request.');
