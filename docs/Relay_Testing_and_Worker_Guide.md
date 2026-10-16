@@ -1,7 +1,7 @@
 # Relay Testing & Worker Guide
 
 **Project:** Relay
-**Current test checkpoint:** 124 tests passing, 0 failing (verified October 15, 2026)
+**Current test checkpoint:** 136 tests passing, 0 failing (verified October 16, 2026)
 **Purpose:** Explain what the tests protect, how the queue/worker system fits together, and what to do when adding new behavior.
 
 ---
@@ -429,7 +429,7 @@ The worker emits state-change events **after** the corresponding database update
 
 # 10. Test Catalog
 
-The suite currently contains **124 tests**, with **124 passing and 0 failing** at the verified checkpoint.
+The suite currently contains **136 tests**, with **136 passing and 0 failing** at the verified checkpoint.
 
 ## A. Gmail Integration and Outreach Safety Tests
 
@@ -595,6 +595,23 @@ The suite currently contains **124 tests**, with **124 passing and 0 failing** a
 | `outreach-operator-run-review.test.ts` | Outreach operator runner: returns a prospect review | Review reaches the read model and returns its result. |
 | `outreach-operator-unknown-command.test.ts` | Outreach operator args: rejects unknown command | Unknown operator actions fail closed. |
 
+## I. Operational Monitoring Tests
+
+| Test file | Test | What it protects |
+| --- | --- | --- |
+| `outreach-monitor-attention.test.ts` | Outreach monitor: exits two when attention is required | Schedulers can distinguish an operational alert from success or monitor failure. |
+| `outreach-monitor-healthy.test.ts` | Outreach monitor: emits JSON and exits zero when healthy | A healthy status produces the documented JSON contract and success exit code. |
+| `outreach-monitor-invalid-threshold.test.ts` | Outreach monitor: rejects invalid threshold configuration before querying | Invalid configuration fails closed without touching the database. |
+| `outreach-monitor-query-error.test.ts` | Outreach monitor: propagates status-query failures to the CLI error boundary | Database failures reach the command boundary and become monitor errors. |
+| `outreach-monitor-thresholds.test.ts` | Outreach monitor: passes configured thresholds to the status query | Environment overrides reach the operational query exactly. |
+| `outreach-operations-delayed-job.test.ts` | Outreach operations: does not alert on a delayed pending job | A future retry is visible without being mislabeled as overdue work. |
+| `outreach-operations-failed-job.test.ts` | Outreach operations: alerts on a failed job | Terminal failures produce a machine-detectable operator alert. |
+| `outreach-operations-invalid-threshold.test.ts` | Outreach operations: rejects an invalid monitoring threshold | Monitoring fails closed on nonsensical threshold configuration. |
+| `outreach-operations-overdue-ready-job.test.ts` | Outreach operations: alerts on an overdue ready job | Ready work that is not being claimed becomes visible. |
+| `outreach-operations-reconciliation.test.ts` | Outreach operations: alerts on reconciliation state | Uncertain Gmail outcomes remain visible until a human resolves them. |
+| `outreach-operations-stale-job.test.ts` | Outreach operations: alerts on a stale processing job | Abandoned processing work produces an operator alert. |
+| `outreach-operations-status.test.ts` | Outreach operations: returns a consistent operational snapshot | Aggregate counts remain internally consistent without exposing message content. |
+
 ---
 
 # 11. Why There Are Two Different "Claim" Test Groups
@@ -705,8 +722,8 @@ npm test
 Current healthy result:
 
 ```text
-tests 124
-pass 124
+tests 136
+pass 136
 fail 0
 ```
 
@@ -833,7 +850,7 @@ This milestone verifies the intended recovery path without changing the rule tha
 
 ## What comes next
 
-Future work is operational rather than connecting the core Gmail path: production scheduling, monitoring, alerting, reconciliation runbooks, and additional guarded recovery tooling should build on the current fail-closed behavior. None of those additions should weaken the live-send gate, reconciliation requirement, or no-blind-retry boundary.
+The read-only monitoring command and production operations runbook now define the first operational layer. Host scheduler activation and alert delivery remain deployment actions requiring explicit production approval. Additional guarded recovery tooling should continue to build on the current fail-closed behavior without weakening the live-send gate, reconciliation requirement, or no-blind-retry boundary.
 
 ---
 
@@ -888,6 +905,14 @@ approveOutreachDraft(prospectId, draftId)
 queueApprovedOutreachDraft(prospectId, draftId)
     -> creates one pending outreach job
     -> requires approved/pending draft and draft_ready prospect
+
+getOutreachOperationalStatus(options?)
+    -> read-only aggregate queue and reconciliation snapshot
+    -> alerts on failed, stale, overdue, or reconciliation state
+
+npm run monitor:outreach
+    -> JSON operational snapshot
+    -> exit 0 healthy / 2 attention required / 1 monitor error
 ```
 
 ### Worker outcomes
@@ -916,7 +941,7 @@ reconciliation resolved -> same failed job requeued
 
 ## Recommended mental model
 
-If the number of tests starts feeling overwhelming, do not memorize all 124.
+If the number of tests starts feeling overwhelming, do not memorize all 136.
 
 Remember the layers:
 
@@ -929,6 +954,7 @@ Remember the layers:
 6. Gmail reconciliation safety
 7. Guarded manual recovery
 8. Human review and operator controls
+9. Operational monitoring and alert signals
 ```
 
 Every test belongs to one of those buckets.

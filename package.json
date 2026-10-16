@@ -7,6 +7,7 @@
     "test": "tsx --test --test-concurrency=1 tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "worker:outreach": "tsx scripts/run-outreach-worker.ts",
+    "monitor:outreach": "tsx scripts/monitor-outreach.ts",
     "outreach:operator": "tsx scripts/outreach-operator.ts"
   },
   "keywords": [],
