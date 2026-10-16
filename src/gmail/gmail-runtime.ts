@@ -9,6 +9,11 @@ import {
 import { createVerifiedGmailDraftSender } from "./gmail-verified-draft-sender.js";
 import type { GmailDraftSender } from "./gmail-types.js";
 import { createGmailDraftCreator, type GmailDraftCreator } from "./gmail-draft-creator.js";
+import { createGmailThreadReader } from "./gmail-thread-reader.js";
+
+export function createProductionGmailThreadReader(environment: GmailEnvironment = process.env) {
+  return createGmailThreadReader(createGmailApi(createGmailOAuthClient(loadGmailCredentials(environment))));
+}
 
 export function createProductionGmailDraftCreator(
   environment: GmailEnvironment = process.env,

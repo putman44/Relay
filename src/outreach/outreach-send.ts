@@ -129,6 +129,12 @@ export async function claimOutreachSend(
     // Run the remaining outreach business-rule checks before
     // changing the draft into the sending state.
     const validation = validateOutreachSend(prospect, draft);
+    const unhealthy = await client.query(`SELECT 1 WHERE EXISTS (SELECT 1 FROM message_drafts d
+      JOIN reply_thread_checks c ON c.draft_id = d.id
+      WHERE d.prospect_id = $1 AND c.status <> 'ok')
+      OR EXISTS (SELECT 1 FROM prospect_replies r WHERE r.prospect_id = $1)`, [prospectId]);
+    if (unhealthy.rowCount) validation.errors.push("Reply monitoring requires attention before cold outreach.");
+    validation.valid = validation.errors.length === 0;
 
     if (!validation.valid) {
       await client.query("ROLLBACK");
@@ -212,6 +218,8 @@ export async function completeOutreachSend(
 
   try {
     await client.query("BEGIN");
+    // Serialize with reply recording before reading reply state or locking drafts.
+    await client.query("SELECT id FROM prospects WHERE id = $1 FOR UPDATE", [prospectId]);
 
     // Lock the draft while completing the send.
     // The draft must also belong to the supplied prospect.
@@ -277,7 +285,8 @@ export async function completeOutreachSend(
       `
         UPDATE prospects
         SET
-          stage = 'outreach_sent',
+          stage = CASE WHEN EXISTS (SELECT 1 FROM prospect_replies r WHERE r.prospect_id = prospects.id)
+            THEN 'replied' ELSE 'outreach_sent' END,
           updated_at = now()
         WHERE id = $1;
       `,

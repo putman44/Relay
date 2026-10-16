@@ -5,6 +5,7 @@ export const PROSPECT_STAGES = [
   "draft_ready",
   "outreach_sent",
   "send_reconciliation",
+  "replied",
 ] as const;
 
 export type ProspectStage = (typeof PROSPECT_STAGES)[number];

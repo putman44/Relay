@@ -11,7 +11,7 @@ Postgres and an operator UI remains an explicit product decision.
 | Order | Capability | Status and acceptance boundary |
 | ---: | --- | --- |
 | 1 | Outreach drafting through approved sending | Durable draft creation and actual-draft MIME preflight implemented with fake-Gmail verification; existing approval, queue, send, and reconciliation core retained. Deployment and controlled external acceptance remain |
-| 2 | Reply monitoring | Pending: detect new inbound messages, persist reply identity, suppress cold follow-ups, and handle unavailable threads |
+| 2 | Reply monitoring | Implemented locally: full-thread reading, durable inbound identities, cold-outreach suppression, bounded polling, and unavailable-thread handling. External acceptance and scheduling remain |
 | 3 | Classification and response drafts | Pending: validate AI outputs, bind each draft to an exact inbound reply, invalidate stale drafts, preserve human approval, and handle opt-outs/OOO |
 | 4 | Follow-up drafting and sending | Pending: local calendar dates, two-touch cap, newer-inbound preflight, explicit approval, durable claims, and uncertain-send recovery |
 | 5 | Prospect research | Pending: OpenAI/Firecrawl, validated output schema, Drive briefs, missing-contact handling, durable artifact creation and resume/recovery |
@@ -157,3 +157,73 @@ npx tsx --test --test-concurrency=1 tests/gmail/gmail-draft-creator.test.ts test
 For a fully isolated regression run, provision a disposable database with all
 migrations and set both `DATABASE_URL` and `RELAY_DRAFT_TEST_DATABASE_URL` to its
 direct connection URL before `npm test`. Existing tests use `DATABASE_URL`.
+
+## Second slice: reply monitoring
+
+Apply `008_create_reply_monitor.sql` before deploying this code, including the
+updated sender and operator. It adds a `replied` stage, a persistent
+`cold_outreach_blocked` flag, `prospect_replies`, and `reply_thread_checks`.
+Migration 008 has not been applied to the application database or droplet.
+
+The separate, explicitly invoked command is:
+
+```bash
+npm run monitor:replies -- --confirm-record-replies
+```
+
+This reads Gmail and writes Postgres. It never creates drafts, changes labels,
+queues jobs, or sends mail. It requires the existing OAuth configuration with
+thread-read permission; live credential/scopes acceptance has not been performed.
+No scheduler or Docker deployment for this command is included in this slice.
+The existing read-only queue monitor remains separate and requires no Gmail credentials.
+
+Each run processes up to 50 confirmed-sent outreach drafts, oldest checked first.
+It validates thread/message identities and timestamps, then records every inbound
+message at or after the confirmed outbound Gmail message's timestamp, excluding
+SENT and DRAFT messages. The exact stored sent-message ID must be present in the
+thread with a SENT label. This avoids missing fast replies that arrive before
+database send finalization; same-millisecond inbound is conservatively retained.
+Archived messages, automatic replies, and bounces also stop cold outreach; their
+classification belongs to step 3. Identity is unique per prospect/message, so
+repeated polls cannot duplicate events. Latest reply is derived by ordering
+`received_at DESC, gmail_message_id DESC`; older delayed polls cannot replace it.
+Only metadata/snippets are retained here; full reply body extraction belongs to
+classification. Never treat snippets as complete reply content.
+
+Reply recording locks the prospect and rechecks the exact sent draft before
+committing. It sets durable suppression and `replied`, except that an existing
+`send_reconciliation` stage is preserved. Queueing and send claims reject blocked
+prospects even if their stage is later reset. Existing sending/uncertain drafts,
+jobs, and confirmed-send evidence are not reset. Finalizing an already-in-flight
+send preserves recorded replies and suppression. This cannot cancel a send
+already claimed/in flight, and polling is not a freshness guarantee: step 4 must
+add a live newer-inbound check immediately before any follow-up send.
+
+404/410 thread reads are recorded as `unavailable`, permanently block cold
+outreach, and stop polling that draft pending human repair. Other read failures,
+including authentication, rate limiting, invalid input, and incomplete responses,
+record `error` and are retried on subsequent polls. Any non-OK check blocks queue
+and send claims. A later successful poll clears a transient check, but never
+clears durable reply/unavailable suppression. There is deliberately no automatic
+unblock command. Inspect Gmail, prospect replies, and thread checks before a
+separately reviewed repair; do not reset flags just to resume sends.
+
+The command emits aggregate counts only and exits nonzero for read errors,
+persisted non-OK checks (including unavailable threads skipped this run), or
+persistence failures. Successful writes for earlier targets remain committed if
+a later target fails. Query `reply_thread_checks` for per-draft status. No raw
+Gmail errors, message bodies, or recipient addresses are logged by this command.
+Records with missing confirmed-send/thread identity are not polling candidates;
+existing reconciliation tooling remains responsible for resolving those cases.
+
+Tests use fake thread readers and disposable Postgres only. They cover duplicate
+and concurrent polls, older replies, malformed messages, unavailable/transient
+failures, fair bounded polling, changed-draft rollback, queue/claim suppression,
+and preservation of in-flight/reconciliation state. The new isolated-schema
+integration test uses `RELAY_DRAFT_TEST_DATABASE_URL`, as described above.
+
+Verification on October 16, 2026: 189/189 full regression tests passed on
+disposable localhost Postgres. After the final archived-message handling change
+and its additional regression test, the 20-test reply-monitor subset passed
+again. Typecheck and whitespace checks passed. No application/droplet migrations,
+Gmail requests, outreach sends, or production worker invocations occurred.

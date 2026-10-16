@@ -1,7 +1,7 @@
 # Relay Testing & Worker Guide
 
 **Project:** Relay
-**Current test checkpoint:** 170/170 full regression tests passed on disposable local Postgres, including actual-draft preflight and draft creation (verified October 16, 2026). The final preflight/state-preservation changes also passed a focused rerun.
+**Current test checkpoint:** 189/189 full regression tests passed on disposable local Postgres (October 16, 2026). After the final archived-message handling adjustment and its additional test, all 20 reply-monitor tests passed in a focused rerun. Typecheck passed. No live Gmail operations were performed.
 **Purpose:** Explain what the tests protect, how the queue/worker system fits together, and what to do when adding new behavior.
 
 ---
@@ -981,3 +981,18 @@ and attachments currently block review rather than passing a text-only check.
 | `tests/outreach/outreach-draft-creation.test.ts` | Isolated-schema migration, reservation before Gmail, concurrent attempts, review-only success, uncertain results, contact edits, finalization failure, DB outage, existing/interrupted requests |
 | `tests/gmail/gmail-draft-preflight.test.ts` | MIME decoding, IDs/labels/thread, recipient/header injection, changed copy, unsupported formats, verified send snapshot, and send-failure classification |
 | `tests/jobs/process-outreach-job-preflight.test.ts` | Review block and terminal job state, approved-content handoff, preservation of confirmed-send evidence, and changed-state persistence rejection |
+
+## Reply monitoring migration
+
+See the second slice in [Relay Migration Plan](Relay_Migration_Plan.md) for
+migration 008, the explicitly invoked `monitor:replies` command, error handling,
+and the limits of polling versus live follow-up preflight. This command reads
+Gmail and writes Postgres; it is not the read-only queue-health monitor.
+Production migration, Gmail acceptance, and scheduling remain pending.
+
+| Test file | Coverage |
+| --- | --- |
+| `tests/gmail/gmail-thread-reader.test.ts` | Full-thread read request, unavailable versus transient/auth errors, no mailbox mutation |
+| `tests/outreach/reply-monitor.test.ts` | Exact sent-message anchor, fast/same-millisecond replies, archived/automatic messages, malformed thread rejection |
+| `tests/outreach/reply-monitor-database.test.ts` | Disposable-schema migrations, idempotent/concurrent polling, persistent unavailable state, retries, bounded polling, stale-read rollback, preserved reconciliation |
+| `tests/outreach/reply-outreach-guards.test.ts` | Reply evidence and persistent suppression block queue/claim, unhealthy checks block sends, late finalization preserves replies |

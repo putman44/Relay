@@ -9,6 +9,7 @@ export type Prospect = {
   contact_name: string | null;
   contact_email: string | null;
   stage: ProspectStage;
+  cold_outreach_blocked?: boolean;
   created_at: Date;
   updated_at: Date;
 };
@@ -22,6 +23,7 @@ export async function listProspects(): Promise<Prospect[]> {
       contact_name,
       contact_email,
       stage,
+      cold_outreach_blocked,
       created_at,
       updated_at
     FROM prospects
@@ -41,6 +43,7 @@ export async function getProspectById(id: string): Promise<Prospect | null> {
         contact_name,
         contact_email,
         stage,
+        cold_outreach_blocked,
         created_at,
         updated_at
       FROM prospects

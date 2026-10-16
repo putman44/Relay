@@ -9,6 +9,7 @@
     "draft:outreach": "tsx scripts/create-outreach-draft.ts",
     "worker:outreach": "tsx scripts/run-outreach-worker.ts",
     "monitor:outreach": "tsx scripts/monitor-outreach.ts",
+    "monitor:replies": "tsx scripts/monitor-replies.ts",
     "outreach:operator": "tsx scripts/outreach-operator.ts"
   },
   "keywords": [],
