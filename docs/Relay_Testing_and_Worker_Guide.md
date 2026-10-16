@@ -1,7 +1,7 @@
 # Relay Testing & Worker Guide
 
 **Project:** Relay
-**Current test checkpoint:** 250/250 full regression tests passed on disposable local Postgres (October 16, 2026). All 29 follow-up tests also passed after the final reused-send-ID guard. Typecheck and whitespace checks passed. No live Gmail or OpenAI operations were performed.
+**Current test checkpoint:** 263/263 full regression tests passed on disposable local Postgres (October 16, 2026), including the step 5 research tests. Typecheck and whitespace checks passed. No live Firecrawl, OpenAI, Drive, or Gmail operations were performed.
 **Purpose:** Explain what the tests protect, how the queue/worker system fits together, and what to do when adding new behavior.
 
 ---
@@ -1037,6 +1037,26 @@ No live flag, scheduler, deployment, or Gmail operation was enabled by this work
 | `tests/gmail/follow-up-preflight.test.ts` | Exact parent identity, required/duplicate/changed In-Reply-To and References headers |
 | `tests/outreach/follow-up-boundaries.test.ts` | Initial-outreach tools reject follow-up approval/queue/claim/reconciliation |
 | `tests/outreach/follow-up-pipeline.test.ts` | Disposable-schema migration, preserved templates/signature, two-touch scheduling, concurrent reservations, approval fingerprint, newer replies, MIME snapshots, uncertainty, database outages, lost acknowledgement and stale approval |
+
+## Prospect research migration
+
+Step 5 adds migration 011 and the separately confirmed `npm run research`
+command. It stores scraped page evidence and a validated research result before
+creating a Drive folder, Google Docs brief, or Gmail draft. A public email must
+appear on its cited page; missing contacts and C-fit prospects retain a brief
+without a draft. Created outreach drafts still require human review and separate
+approval. Each provider creation has a committed journal state; uncertain
+outcomes require reconciliation instead of automatic recreation. See
+`Relay_Migration_Plan.md` for setup, supported scope, and external acceptance.
+
+| Test | What it protects |
+| --- | --- |
+| `tests/research/research-contract.test.ts` | Safe same-origin link selection, exact source and public-email evidence, strict object/string validation, tool-free provider requests, and explicit CLI confirmation |
+| `tests/research/prospect-research.test.ts` | Disposable-schema migration, review-only success, missing-contact and C-fit holds, concurrent reservation, retained Drive IDs after failure, uncertain Gmail creation, duplicate blocking, and resume from a verified brief checkpoint |
+
+The integration test uses `RELAY_DRAFT_TEST_DATABASE_URL` with a disposable
+Postgres database and fake provider implementations. No live Firecrawl,
+OpenAI, Drive, or Gmail calls occur during the suite.
 
 Follow-up send tests call only a fake API: its `drafts.send` method asserts the
 approved raw snapshot and disabled retries. They do not call Gmail, enable the

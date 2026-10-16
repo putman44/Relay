@@ -25,11 +25,16 @@ const oauth2Client = new google.auth.OAuth2(
 );
 
 const state = randomBytes(32).toString("hex");
+const includeDrive = process.argv.slice(2).length === 1 && process.argv[2] === '--include-drive-file';
+if (process.argv.length > 2 && !includeDrive) {
+  throw new Error('Optional argument: --include-drive-file');
+}
 
 const authorizationUrl = oauth2Client.generateAuthUrl({
   access_type: "offline",
   prompt: "consent",
-  scope: ["https://www.googleapis.com/auth/gmail.compose"],
+  scope: ["https://www.googleapis.com/auth/gmail.compose",
+    ...(includeDrive ? ["https://www.googleapis.com/auth/drive.file"] : [])],
   state,
 });
 

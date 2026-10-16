@@ -14,13 +14,83 @@ Postgres and an operator UI remains an explicit product decision.
 | 2 | Reply monitoring | Implemented locally: full-thread reading, durable inbound identities, cold-outreach suppression, bounded polling, and unavailable-thread handling. External acceptance and scheduling remain |
 | 3 | Classification and response drafts | Implemented locally: validated classification, exact-reply-bound review drafts, stale approval invalidation, opt-out/automatic-message safety, and durable creation journals. External acceptance and managed response approval/send remain |
 | 4 | Follow-up drafting and sending | Implemented locally: explicit-zone calendar timing, two-touch cap, source-bound drafts/approval, live inbound/MIME preflight, durable send claims and uncertain-send holds. Deployment, scheduling, controlled external acceptance and guarded recovery remain |
-| 5 | Prospect research | Pending: OpenAI/Firecrawl, validated output schema, Drive briefs, missing-contact handling, durable artifact creation and resume/recovery |
+| 5 | Prospect research | Implemented locally: bounded public-site evidence, strict sourced output, Drive folder/brief and review-only Gmail draft, missing-contact/low-fit holds, durable creation journals and safe checkpoint resume. Provider scopes, deployment, controlled external acceptance, and remaining n8n search/map/Airtable parity remain |
 | 6 | Client onboarding | Pending: client identity, onboarding/task uniqueness, safe retries, and exact expected-task reconciliation |
 
 No step is production-complete solely because local tests pass. Keep n8n disabled
 while migrating and verify each replacement's external effects during separately
 authorized acceptance runs. Retire workflows only after their retained behaviors
 have replacements or are explicitly removed from scope.
+
+## Fifth slice: public prospect research
+
+Migration 011 adds the `research_in_progress`, `needs_contact`, and
+`research_review` stages, an `industry` field, and one durable research request
+per prospect. Apply it through the reviewed migration process before running
+the new `npm run research` command. It has been applied only to disposable local
+Postgres for testing; the application database and droplet are unchanged.
+
+`start` requires a researching prospect with a supplied HTTPS business website,
+an explicit Drive parent folder ID, and a confirmation flag. It reserves the
+prospect before any provider call. Relay scrapes the supplied website and up to
+four relevant links actually discovered on its first page. It stays on the same
+origin and does not run the old n8n general web search or map phase. Firecrawl
+scrape responses must report the exact requested source URL and successful HTTP
+status. The model receives only those saved pages, has no tools, and must return
+the exact research schema. Relay validates sources against fetched pages and
+requires a recommended email to appear on its cited page. This is structural
+evidence checking; a person must still assess whether claims and copy are true.
+
+After validation, Relay creates a Drive folder, a Google Docs research brief,
+and, only for A/B fit with a publicly evidenced contact email, a plain-text
+Gmail draft. The draft is `needs_review` / `pending` and no send job is created.
+Fit C ends in `research_review`; missing email ends in `needs_contact`. Both
+retain the brief and create no Gmail draft. Supplied contact, industry, and
+discovery question fields are never replaced by model suggestions. A conflicting
+contact fails validation and holds the request for human inspection. The brief
+retains observations, hypotheses, unknowns, citations, outreach copy, and
+limitations. Gmail copy receives the existing authored Relay signature.
+
+Each external create call has a committed `*_creating` state first and disables
+automatic transport retries. Returned IDs are retained if local finalization
+fails. An uncertain outcome becomes `needs_reconciliation` when Postgres is
+available; a stranded creating state also blocks another request. Do not delete
+the request or start under a new ID to bypass a hold. `resume` accepts only
+`research_ready`, `folder_ready`, or `brief_ready` checkpoints, plus a
+`researching` request older than two hours that has not begun artifact creation.
+It verifies existing Drive artifact IDs and parents before later writes. It
+never retries `*_creating` or `needs_reconciliation` automatically. Drive
+artifact metadata includes the research request ID to aid manual inspection.
+
+Configuration: `DATABASE_URL`, `FIRECRAWL_API_KEY`, `OPENAI_API_KEY`, an explicit
+`RELAY_RESEARCH_MODEL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+`GOOGLE_REFRESH_TOKEN`, and `RELAY_RESEARCH_DRIVE_PARENT_ID`. The existing Google
+refresh token may lack Drive authorization. `scripts/authorize-gmail.ts
+--include-drive-file` requests the Gmail compose and Drive file scopes, but a
+`drive.file` token must also be able to access the chosen parent folder; verify
+this during controlled acceptance. No secret or real prospect input is stored
+in the repository.
+
+```bash
+npm run research -- status --prospect PROSPECT_UUID
+npm run research -- start --prospect PROSPECT_UUID --confirm-research
+npm run research -- resume --request REQUEST_UUID --confirm-resume
+```
+
+The latter two commands can incur Firecrawl/OpenAI usage and create Drive/Gmail
+artifacts; they have not been run against live accounts. The status command
+prints IDs and state without exposing the research content. A blocked or failed
+request requires manual evidence review before any recovery design. Firecrawl
+may follow redirects or resolve DNS inside its service; Relay validates the
+requested and reported source URL but cannot prove Firecrawl's internal fetch
+path. The next acceptance pass must verify Drive scopes/parent access, actual
+Google Docs conversion, Gmail draft appearance and MIME, output quality on a
+test prospect, and operator review before enabling any production workflow.
+
+Local verification on October 16, 2026: typecheck and 263/263 full regression
+tests passed. Research tests use fake Firecrawl, OpenAI, Drive, and Gmail
+providers plus disposable localhost Postgres. No live provider request,
+production migration, send, or worker execution was part of this step.
 
 ## First slice: supplied outreach copy to a reviewable Gmail draft
 
