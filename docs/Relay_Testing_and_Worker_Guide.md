@@ -1,18 +1,19 @@
 # Relay Testing & Worker Guide
 
 **Project:** Relay
-**Current test checkpoint:** 62 tests passing, 0 failing (verified October 4, 2026)
+**Current test checkpoint:** 124 tests passing, 0 failing (verified October 15, 2026)
 **Purpose:** Explain what the tests protect, how the queue/worker system fits together, and what to do when adding new behavior.
 
 ---
 
 ## 1. Big Picture
 
-Relay now has three major safety layers:
+Relay now has four major safety layers:
 
-1. **Outreach/business rules** protect approved drafts and sending behavior.
-2. **Outreach job queue + worker rules** protect background processing, retries, failures, and concurrency.
-3. **Gmail side-effect rules** distinguish safe retries from outcomes that require human reconciliation.
+1. **Human review/operator rules** require exact record identities and explicit confirmation for mutations.
+2. **Outreach/business rules** protect approved drafts and sending behavior.
+3. **Outreach job queue + worker rules** protect background processing, retries, failures, and concurrency.
+4. **Gmail side-effect rules** distinguish safe retries from outcomes that require human reconciliation.
 
 ```mermaid
 flowchart LR
@@ -357,6 +358,26 @@ flowchart TD
 
 In the production processor, a Gmail call that throws or returns an uncertain outcome is converted into a non-retryable failure after reconciliation state is persisted. The worker therefore marks the job failed on that attempt instead of scheduling another Gmail send.
 
+### Guarded operator review flow
+
+The operator CLI exposes the human-controlled path without starting the worker:
+
+```bash
+npm run outreach:operator -- review --prospect <prospect-uuid>
+
+npm run outreach:operator -- approve \
+  --prospect <prospect-uuid> \
+  --draft <draft-uuid> \
+  --confirm-approval
+
+npm run outreach:operator -- queue \
+  --prospect <prospect-uuid> \
+  --draft <draft-uuid> \
+  --confirm-queue
+```
+
+`review` is read-only. `approve` changes only an eligible `needs_review` outreach draft to `approved`. `queue` creates one pending job only for the matching approved/pending draft and a `draft_ready` prospect. Approval does not automatically queue, and queueing does not run the worker or call Gmail. Both mutations require their exact confirmation flag.
+
 ---
 
 ## 9. Worker Event Logging
@@ -408,7 +429,7 @@ The worker emits state-change events **after** the corresponding database update
 
 # 10. Test Catalog
 
-The suite currently contains **62 tests**, with **62 passing and 0 failing** at the verified checkpoint.
+The suite currently contains **124 tests**, with **124 passing and 0 failing** at the verified checkpoint.
 
 ## A. Gmail Integration and Outreach Safety Tests
 
@@ -496,6 +517,83 @@ The suite currently contains **62 tests**, with **62 passing and 0 failing** at 
 | `outreach-worker-retry-logging.test.ts`   | Outreach worker logging: records a scheduled retry after processing fails      | Retry runs emit `claimed` and `retry_scheduled`. |
 | `outreach-worker-failure-logging.test.ts` | Outreach worker logging: records a terminal failure after the final attempt    | Terminal failure emits `claimed` and `failed`.   |
 | `outreach-worker-empty-logging.test.ts`   | Outreach worker logging: records an empty queue event when no job is available | Empty worker runs are visible.                   |
+
+## F. Atomic Reconciliation and Requeue Tests
+
+| Test file | Test | What it protects |
+| --- | --- | --- |
+| `outreach-job-reconcile-and-requeue-missing-job.test.ts` | Outreach reconciliation requeue: rejects a missing job | Recovery cannot invent or mutate a missing job. |
+| `outreach-job-reconcile-and-requeue-rejection-preserves-state.test.ts` | Outreach reconciliation requeue: rejected recovery preserves all state | A rejected recovery attempt leaves the job, draft, and prospect unchanged. |
+| `outreach-job-reconcile-and-requeue-rejects-draft-state.test.ts` | Outreach reconciliation requeue: rejects a draft that is not awaiting reconciliation | Only reconciliation-state drafts enter atomic recovery. |
+| `outreach-job-reconcile-and-requeue-rejects-message-id.test.ts` | Outreach reconciliation requeue: rejects confirmed sent message evidence | A recorded Gmail message ID blocks requeue. |
+| `outreach-job-reconcile-and-requeue-rejects-nonfailed.test.ts` | Outreach reconciliation requeue: rejects a job that is not failed | Active or completed jobs cannot enter failed-job recovery. |
+| `outreach-job-reconcile-and-requeue-rejects-prospect-state.test.ts` | Outreach reconciliation requeue: rejects a prospect that is not awaiting reconciliation | Recovery requires the matching prospect reconciliation state. |
+| `outreach-job-reconcile-and-requeue-rejects-review-status.test.ts` | Outreach reconciliation requeue: rejects a draft that is no longer approved | Recovery cannot bypass human approval. |
+| `outreach-job-reconcile-and-requeue-rejects-sent-at.test.ts` | Outreach reconciliation requeue: rejects confirmed sent timestamp evidence | A recorded send timestamp blocks requeue. |
+| `outreach-job-reconcile-and-requeue.test.ts` | Outreach reconciliation requeue: atomically restores a confirmed-not-sent job | Human-confirmed non-send restores all three durable records together. |
+
+## G. Outreach Review and Queue Tests
+
+| Test file | Test | What it protects |
+| --- | --- | --- |
+| `outreach-review-approve-already-approved.test.ts` | Outreach review approval: rejects an already approved draft | Approval cannot be repeated. |
+| `outreach-review-approve-missing-draft.test.ts` | Outreach review approval: rejects a missing draft | Approval fails closed for an unknown draft. |
+| `outreach-review-approve-nonpending-draft.test.ts` | Outreach review approval: rejects a draft that is not pending | Approval cannot modify a reconciliation or sent draft. |
+| `outreach-review-approve-wrong-prospect.test.ts` | Outreach review approval: rejects a draft belonging to another prospect | Approval requires the exact prospect/draft relationship. |
+| `outreach-review-approve.test.ts` | Outreach review approval: changes needs_review to approved | The intended guarded approval transition succeeds. |
+| `outreach-review-by-prospect.test.ts` | Outreach review: returns the prospect and outreach draft | Review exposes the relevant prospect and draft together. |
+| `outreach-review-latest-draft.test.ts` | Outreach review: returns the latest outreach draft | Review selects the newest outreach draft for the prospect. |
+| `outreach-review-missing-prospect.test.ts` | Outreach review: returns null when the prospect does not exist | Missing prospects are handled without mutation. |
+| `outreach-review-no-draft.test.ts` | Outreach review: returns the prospect with no draft | A valid prospect remains reviewable before drafting. |
+| `outreach-review-queue-approved.test.ts` | Outreach review queue: creates a pending job for an approved draft | An eligible approved draft enters the durable queue. |
+| `outreach-review-queue-concurrent.test.ts` | Outreach review queue: allows only one concurrent queue attempt | Concurrent operators cannot create duplicate jobs. |
+| `outreach-review-queue-duplicate.test.ts` | Outreach review queue: rejects duplicate queueing without creating another job | Sequential duplicate queue attempts are idempotently rejected. |
+| `outreach-review-queue-invalid-stage.test.ts` | Outreach review queue: rejects a prospect that is not draft ready | Only `draft_ready` prospects can be queued. |
+| `outreach-review-queue-nonpending.test.ts` | Outreach review queue: rejects a draft that is not pending | Reconciliation or sent drafts cannot be queued. |
+| `outreach-review-queue-unapproved.test.ts` | Outreach review queue: rejects an unapproved draft | Human approval remains mandatory before queueing. |
+| `outreach-review-queue-wrong-prospect.test.ts` | Outreach review queue: rejects a draft belonging to another prospect | Queueing requires the exact prospect/draft relationship. |
+
+## H. Operator CLI Tests
+
+| Test file | Test | What it protects |
+| --- | --- | --- |
+| `outreach-operator-inspect-job.test.ts` | Outreach operator inspect: returns the exact joined outreach job | Single-job inspection returns joined job, draft, and prospect state. |
+| `outreach-operator-inspect-missing-job.test.ts` | Outreach operator inspect: returns null when job does not exist | Missing job inspection is explicit. |
+| `outreach-operator-inspect-queue-excludes-completed.test.ts` | Outreach operator inspect: excludes completed jobs from the default queue | Completed work stays out of the operational queue view. |
+| `outreach-operator-inspect-queue.test.ts` | Outreach operator inspect: includes a non-completed outreach job | Pending operational work appears in the queue view. |
+| `outreach-operator-inspect-rejects-extra-arguments.test.ts` | Outreach operator args: rejects extra inspect arguments | Inspect cannot silently ignore unexpected input. |
+| `outreach-operator-inspect-rejects-invalid-job-id.test.ts` | Outreach operator args: rejects an invalid inspect job ID | Inspect requires a UUID job identity. |
+| `outreach-operator-parse-approve-invalid-draft.test.ts` | Outreach operator args: rejects approval with an invalid draft ID | Approval requires a UUID draft identity. |
+| `outreach-operator-parse-approve-requires-confirmation.test.ts` | Outreach operator args: rejects approval without confirmation | Approval cannot execute without explicit confirmation. |
+| `outreach-operator-parse-approve.test.ts` | Outreach operator args: parses confirmed approval command | The guarded approval syntax is accepted. |
+| `outreach-operator-parse-inspect-job.test.ts` | Outreach operator args: parses inspect command with job ID | Exact-job inspection syntax is accepted. |
+| `outreach-operator-parse-inspect-missing-job-value.test.ts` | Outreach operator args: rejects inspect when job ID is another option | An option token cannot be mistaken for a job ID. |
+| `outreach-operator-parse-inspect-missing-job.test.ts` | Outreach operator args: rejects inspect without a job ID | `--job` requires a value. |
+| `outreach-operator-parse-inspect-unknown-flag.test.ts` | Outreach operator args: rejects unknown inspect flag | Inspect fails closed on unknown options. |
+| `outreach-operator-parse-inspect.test.ts` | Outreach operator args: parses inspect command | Default queue inspection syntax is accepted. |
+| `outreach-operator-parse-queue-requires-confirmation.test.ts` | Outreach operator args: rejects queueing without confirmation | Queue mutation requires explicit confirmation. |
+| `outreach-operator-parse-queue.test.ts` | Outreach operator args: parses confirmed queue command | The guarded queue syntax is accepted. |
+| `outreach-operator-parse-review-invalid-prospect.test.ts` | Outreach operator args: rejects review with an invalid prospect ID | Review requires a UUID prospect identity. |
+| `outreach-operator-parse-review.test.ts` | Outreach operator args: parses review command | Read-only review syntax is accepted. |
+| `outreach-operator-reconcile-missing-job-id.test.ts` | Outreach operator args: rejects reconciliation without a job ID | Reconciliation requires an explicit job identity. |
+| `outreach-operator-reconcile-rejects-extra-arguments.test.ts` | Outreach operator args: rejects extra reconciliation arguments | Reconciliation cannot silently ignore unexpected input. |
+| `outreach-operator-reconcile-rejects-invalid-job-id.test.ts` | Outreach operator args: rejects an invalid reconciliation job ID | Reconciliation requires a UUID job identity. |
+| `outreach-operator-reconcile-requires-confirmation.test.ts` | Outreach operator args: rejects reconciliation without confirmation | Confirmed non-send is mandatory. |
+| `outreach-operator-reconcile-requires-job.test.ts` | Outreach operator args: rejects reconciliation without job option | Reconciliation requires the `--job` option. |
+| `outreach-operator-reconcile-valid.test.ts` | Outreach operator args: parses confirmed reconciliation command | The guarded recovery syntax is accepted. |
+| `outreach-operator-run-approve-rejected.test.ts` | Outreach operator runner: rejects an unsuccessful draft approval | Domain approval rejection becomes a visible CLI failure. |
+| `outreach-operator-run-approve.test.ts` | Outreach operator runner: executes confirmed draft approval | Confirmed approval reaches the guarded domain action. |
+| `outreach-operator-run-inspect-job.test.ts` | Outreach operator runner: inspects the requested job | The runner passes the exact job identity to inspection. |
+| `outreach-operator-run-inspect-missing-job.test.ts` | Outreach operator runner: rejects a missing requested job | Missing requested jobs produce an error. |
+| `outreach-operator-run-inspect-queue.test.ts` | Outreach operator runner: inspects the default queue | Default inspection reaches the queue read model. |
+| `outreach-operator-run-queue-rejected.test.ts` | Outreach operator runner: rejects unsuccessful draft queueing | Domain queue rejection becomes a visible CLI failure. |
+| `outreach-operator-run-queue.test.ts` | Outreach operator runner: executes confirmed draft queueing | Confirmed queueing reaches the guarded domain action. |
+| `outreach-operator-run-reconcile-not-sent.test.ts` | Outreach operator runner: executes confirmed not-sent reconciliation | Confirmed recovery reaches the atomic reconciliation action. |
+| `outreach-operator-run-reconcile-rejected.test.ts` | Outreach operator runner: rejects an unsuccessful reconciliation | Domain recovery rejection becomes a visible CLI failure. |
+| `outreach-operator-run-reconciliation-blocked.test.ts` | Outreach operator runner: blocks reconciliation execution until implemented | Missing mutation wiring fails closed. |
+| `outreach-operator-run-review-missing.test.ts` | Outreach operator runner: rejects a missing prospect review | Missing prospects produce an error. |
+| `outreach-operator-run-review.test.ts` | Outreach operator runner: returns a prospect review | Review reaches the read model and returns its result. |
+| `outreach-operator-unknown-command.test.ts` | Outreach operator args: rejects unknown command | Unknown operator actions fail closed. |
 
 ---
 
@@ -607,8 +705,8 @@ npm test
 Current healthy result:
 
 ```text
-tests 62
-pass 62
+tests 124
+pass 124
 fail 0
 ```
 
@@ -704,6 +802,10 @@ Example learned during worker development:
 - Human-confirmed not-sent resolution
 - Guarded manual requeue of the existing failed job
 - Explicit live-send enablement guard
+- Outreach review read model
+- Guarded draft approval
+- Guarded approved-draft queue creation
+- Confirmed operator review, approval, and queue commands
 
 Connecting Gmail to `processJob` is complete. The production worker now constructs the Gmail draft sender and executes `processOutreachJob()` for the claimed queue job.
 
@@ -775,6 +877,17 @@ requeueFailedOutreachJob(jobId)
     failed -> pending
     -> guarded manual recovery of the existing unique job
     -> preserves attempt_count and last_error
+
+getOutreachReview(prospectId)
+    -> prospect plus latest outreach draft
+
+approveOutreachDraft(prospectId, draftId)
+    needs_review -> approved
+    -> requires exact prospect and pending outreach draft
+
+queueApprovedOutreachDraft(prospectId, draftId)
+    -> creates one pending outreach job
+    -> requires approved/pending draft and draft_ready prospect
 ```
 
 ### Worker outcomes
@@ -803,7 +916,7 @@ reconciliation resolved -> same failed job requeued
 
 ## Recommended mental model
 
-If the number of tests starts feeling overwhelming, do not memorize all 62.
+If the number of tests starts feeling overwhelming, do not memorize all 124.
 
 Remember the layers:
 
@@ -815,6 +928,7 @@ Remember the layers:
 5. Observability
 6. Gmail reconciliation safety
 7. Guarded manual recovery
+8. Human review and operator controls
 ```
 
 Every test belongs to one of those buckets.
