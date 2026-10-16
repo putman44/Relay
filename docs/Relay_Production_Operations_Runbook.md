@@ -85,9 +85,9 @@ No scheduler is activated by this repository change. When production scheduling 
 
 ### Monitor schedule
 
-- Run `npm run monitor:outreach` every five minutes.
-- Set the working directory to the Relay deployment directory.
-- Load the production database environment without enabling live outreach sending.
+- Run the hardened `relay-outreach-monitor:local` container every five minutes.
+- Keep Node.js, npm, Gmail credentials, and the worker entrypoint out of the host schedule.
+- Load only the production monitor database environment and explicitly override live outreach sending to `false`.
 - Capture stdout, stderr, timestamp, and exit code.
 - Page or notify on exit `1` or `2`; deduplicate repeated alerts outside Relay.
 - Apply a runtime timeout so a hung monitor cannot overlap indefinitely.
@@ -115,7 +115,7 @@ every 1 minute, only after explicit production activation
   -> release lock
 ```
 
-The reviewed systemd monitor templates live in `deploy/systemd/`. They schedule only the read-only monitor and explicitly keep live sending disabled. Do not store production secrets in scheduler definitions or in this repository.
+The reviewed Docker image and systemd monitor templates live in `deploy/docker/` and `deploy/systemd/`. They package and schedule only the read-only monitor, run it as a non-root container with a read-only filesystem, and explicitly keep live sending disabled. Do not store production secrets in the image, scheduler definitions, or this repository.
 
 No worker service or timer is included. Worker scheduling remains a separate production change that requires explicit live-send approval.
 
@@ -125,14 +125,15 @@ No worker service or timer is included. Worker scheduling remains a separate pro
 
 1. Confirm `npm run typecheck` passes.
 2. Confirm `npm test` passes.
-3. Run `npm run monitor:outreach` and review every nonzero count.
-4. Confirm the scheduler working directory, npm path, and environment source.
-5. Validate the systemd files with `systemd-analyze verify` on the Linux host.
-6. Configure the monitor schedule first and verify alert delivery with a controlled non-production test.
-7. Keep live outreach disabled while validating the monitor.
-8. Review every failed or reconciliation record before worker activation.
-9. Obtain explicit approval before enabling the worker schedule or the live-send guard.
-10. After activation, verify one job at a time: claim, Gmail result, database finalization, and completion.
+3. Build `relay-outreach-monitor:local` from `deploy/docker/relay-monitor.Dockerfile`.
+4. Run the hardened container manually and review every nonzero count.
+5. Confirm the Docker path, image tag, database reachability, and environment source.
+6. Validate the systemd files with `systemd-analyze verify` on the Linux host.
+7. Configure the monitor schedule first and verify alert delivery with a controlled non-production test.
+8. Keep live outreach disabled while validating the monitor.
+9. Review every failed or reconciliation record before worker activation.
+10. Obtain explicit approval before enabling the worker schedule or the live-send guard.
+11. After activation, verify one job at a time: claim, Gmail result, database finalization, and completion.
 
 ---
 

@@ -1,30 +1,34 @@
 [Unit]
 Description=Relay outreach queue monitor
 Documentation=file:///opt/relay/docs/Relay_Production_Operations_Runbook.md
+Requires=docker.service
 Wants=network-online.target
-After=network-online.target
+After=docker.service network-online.target
 
 [Service]
 Type=oneshot
-User=relay
-Group=relay
+User=root
+Group=root
 WorkingDirectory=/opt/relay
-EnvironmentFile=/etc/relay/monitor.env
-Environment=RELAY_ENABLE_LIVE_OUTREACH_SEND=false
-Environment=NPM_CONFIG_CACHE=/tmp/relay-npm-cache
-ExecStart=/usr/bin/env RELAY_ENABLE_LIVE_OUTREACH_SEND=false /usr/bin/npm run monitor:outreach
+ExecStartPre=/usr/bin/docker image inspect relay-outreach-monitor:local
+ExecStart=/usr/bin/docker run --pull=never --rm --name relay-outreach-monitor --env-file /etc/relay/monitor.env --env RELAY_ENABLE_LIVE_OUTREACH_SEND=false --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m --security-opt no-new-privileges:true --cap-drop=ALL --user 1000:1000 --pids-limit 64 --memory 256m --cpus 0.50 relay-outreach-monitor:local
+ExecStopPost=-/usr/bin/docker rm --force relay-outreach-monitor
 TimeoutStartSec=60
 
-# The monitor needs outbound database access and read access to the deployment.
-# It does not need host mutation privileges.
+# The host unit needs Docker access. The ephemeral container runs non-root with
+# a read-only filesystem, no Linux capabilities, and no Gmail credentials.
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
 ProtectSystem=strict
 ProtectHome=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
+ProtectKernelLogs=true
 RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX
 LockPersonality=true
 CapabilityBoundingSet=
 UMask=0077
