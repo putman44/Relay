@@ -1,7 +1,7 @@
 # Relay Testing & Worker Guide
 
 **Project:** Relay
-**Current test checkpoint:** 136 tests passing, 0 failing (verified October 16, 2026)
+**Current test checkpoint:** 139 tests passing, 0 failing (verified October 16, 2026)
 **Purpose:** Explain what the tests protect, how the queue/worker system fits together, and what to do when adding new behavior.
 
 ---
@@ -429,7 +429,7 @@ The worker emits state-change events **after** the corresponding database update
 
 # 10. Test Catalog
 
-The suite currently contains **136 tests**, with **136 passing and 0 failing** at the verified checkpoint.
+The suite currently contains **139 tests**, with **139 passing and 0 failing** at the verified checkpoint.
 
 ## A. Gmail Integration and Outreach Safety Tests
 
@@ -722,8 +722,8 @@ npm test
 Current healthy result:
 
 ```text
-tests 136
-pass 136
+tests 139
+pass 139
 fail 0
 ```
 
@@ -941,7 +941,7 @@ reconciliation resolved -> same failed job requeued
 
 ## Recommended mental model
 
-If the number of tests starts feeling overwhelming, do not memorize all 136.
+If the number of tests starts feeling overwhelming, do not memorize all 139.
 
 Remember the layers:
 

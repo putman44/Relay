@@ -115,7 +115,9 @@ every 1 minute, only after explicit production activation
   -> release lock
 ```
 
-Keep host-specific cron, launchd, systemd, or managed-scheduler configuration in the deployment system. Do not store production secrets in scheduler definitions or in this repository.
+The reviewed systemd monitor templates live in `deploy/systemd/`. They schedule only the read-only monitor and explicitly keep live sending disabled. Do not store production secrets in scheduler definitions or in this repository.
+
+No worker service or timer is included. Worker scheduling remains a separate production change that requires explicit live-send approval.
 
 ---
 
@@ -124,12 +126,13 @@ Keep host-specific cron, launchd, systemd, or managed-scheduler configuration in
 1. Confirm `npm run typecheck` passes.
 2. Confirm `npm test` passes.
 3. Run `npm run monitor:outreach` and review every nonzero count.
-4. Confirm the scheduler working directory and environment source.
-5. Configure the monitor schedule first and verify alert delivery with a controlled non-production test.
-6. Keep live outreach disabled while validating the monitor.
-7. Review every failed or reconciliation record before worker activation.
-8. Obtain explicit approval before enabling the worker schedule or the live-send guard.
-9. After activation, verify one job at a time: claim, Gmail result, database finalization, and completion.
+4. Confirm the scheduler working directory, npm path, and environment source.
+5. Validate the systemd files with `systemd-analyze verify` on the Linux host.
+6. Configure the monitor schedule first and verify alert delivery with a controlled non-production test.
+7. Keep live outreach disabled while validating the monitor.
+8. Review every failed or reconciliation record before worker activation.
+9. Obtain explicit approval before enabling the worker schedule or the live-send guard.
+10. After activation, verify one job at a time: claim, Gmail result, database finalization, and completion.
 
 ---
 

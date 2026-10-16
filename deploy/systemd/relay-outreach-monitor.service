@@ -1,0 +1,30 @@
+[Unit]
+Description=Relay outreach queue monitor
+Documentation=file:///opt/relay/docs/Relay_Production_Operations_Runbook.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=relay
+Group=relay
+WorkingDirectory=/opt/relay
+EnvironmentFile=/etc/relay/monitor.env
+Environment=RELAY_ENABLE_LIVE_OUTREACH_SEND=false
+Environment=NPM_CONFIG_CACHE=/tmp/relay-npm-cache
+ExecStart=/usr/bin/env RELAY_ENABLE_LIVE_OUTREACH_SEND=false /usr/bin/npm run monitor:outreach
+TimeoutStartSec=60
+
+# The monitor needs outbound database access and read access to the deployment.
+# It does not need host mutation privileges.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+UMask=0077
