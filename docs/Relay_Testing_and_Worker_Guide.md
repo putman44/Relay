@@ -1,7 +1,7 @@
 # Relay Testing & Worker Guide
 
 **Project:** Relay
-**Current test checkpoint:** 219/219 full regression tests passed on disposable local Postgres (October 16, 2026). A final 51-test reply-processing/monitoring subset, including the additional CLI and creation-race tests, passed with no skips. Typecheck and whitespace checks passed. No live Gmail or OpenAI operations were performed.
+**Current test checkpoint:** 250/250 full regression tests passed on disposable local Postgres (October 16, 2026). All 29 follow-up tests also passed after the final reused-send-ID guard. Typecheck and whitespace checks passed. No live Gmail or OpenAI operations were performed.
 **Purpose:** Explain what the tests protect, how the queue/worker system fits together, and what to do when adding new behavior.
 
 ---
@@ -1020,3 +1020,27 @@ disposable direct Postgres connection. The response tests create/drop a unique
 schema, apply all migrations, and inject fake Gmail/classification providers.
 The full suite still also needs `DATABASE_URL` pointed at that disposable
 database. Never use the application database to run migration-based tests.
+
+## Follow-up drafting and approved sending
+
+The fourth slice in [Relay Migration Plan](Relay_Migration_Plan.md) documents
+migration 010, explicit-zone timing, numbered touches, approval hashes, fresh
+Gmail/MIME checks, durable creation/send reservations, and recovery boundaries.
+The separate `follow-up` command offers plan, draft, approve and guarded send;
+the existing initial-outreach worker is not expanded to process follow-ups.
+No live flag, scheduler, deployment, or Gmail operation was enabled by this work.
+
+| Test file | Coverage |
+| --- | --- |
+| `tests/outreach/follow-up-calendar.test.ts` | Local midnight eligibility, spring/fall DST, four-/five-day spacing, cap, leap days and invalid input |
+| `tests/operator/follow-up-input.test.ts` | Exact confirmation flags, UUID/zone parsing, disabled live-send gate before provider/DB use |
+| `tests/gmail/follow-up-preflight.test.ts` | Exact parent identity, required/duplicate/changed In-Reply-To and References headers |
+| `tests/outreach/follow-up-boundaries.test.ts` | Initial-outreach tools reject follow-up approval/queue/claim/reconciliation |
+| `tests/outreach/follow-up-pipeline.test.ts` | Disposable-schema migration, preserved templates/signature, two-touch scheduling, concurrent reservations, approval fingerprint, newer replies, MIME snapshots, uncertainty, database outages, lost acknowledgement and stale approval |
+
+Follow-up send tests call only a fake API: its `drafts.send` method asserts the
+approved raw snapshot and disabled retries. They do not call Gmail, enable the
+live-send flag, or start the production worker. New integration tests require
+`RELAY_DRAFT_TEST_DATABASE_URL` pointing at a disposable direct Postgres database.
+Requests/attempts are durable blocks, not permission to automatically retry;
+production recovery tooling and controlled external acceptance remain pending.

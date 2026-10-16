@@ -56,7 +56,7 @@ export async function resolveOutreachReconciliationAsNotSent(
       };
     }
 
-    if (!draft) {
+    if (!draft || draft.draft_type !== 'outreach') {
       await client.query("ROLLBACK");
 
       return {

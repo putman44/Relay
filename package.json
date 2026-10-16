@@ -11,6 +11,7 @@
     "monitor:outreach": "tsx scripts/monitor-outreach.ts",
     "monitor:replies": "tsx scripts/monitor-replies.ts",
     "reply:process": "tsx scripts/process-reply.ts",
+    "follow-up": "tsx scripts/follow-up.ts",
     "outreach:operator": "tsx scripts/outreach-operator.ts"
   },
   "keywords": [],

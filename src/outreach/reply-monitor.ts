@@ -88,6 +88,10 @@ export async function monitorReplies(database: Pool, readThread: GmailThreadRead
         const latest = (await client.query(`SELECT gmail_message_id FROM prospect_replies
           WHERE prospect_id=$1 ORDER BY received_at DESC,gmail_message_id DESC LIMIT 1`, [target.prospect_id])).rows[0];
         await invalidateStaleResponseDrafts(client, target.prospect_id, latest.gmail_message_id);
+        await client.query(`UPDATE message_drafts SET review_status='rejected',
+          review_notes='Inbound reply blocks cold follow-up.',updated_at=now()
+          WHERE prospect_id=$1 AND draft_type='follow_up' AND send_status='pending'
+            AND sent_at IS NULL AND sent_message_id IS NULL`, [target.prospect_id]);
       }
       await client.query(`INSERT INTO reply_thread_checks (draft_id, status) VALUES ($1,$2)
         ON CONFLICT (draft_id) DO UPDATE SET status = CASE

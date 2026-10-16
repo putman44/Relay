@@ -14,6 +14,8 @@ export type MessageDraft = {
   gmail_draft_id: string | null;
   gmail_thread_id: string | null;
   source_reply_message_id?: string | null;
+  follow_up_number?: number | null;
+  parent_outreach_draft_id?: string | null;
   review_status: ReviewStatus;
   send_status: SendStatus;
   review_notes: string | null;

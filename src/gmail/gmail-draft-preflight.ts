@@ -69,6 +69,10 @@ export const verifyGmailDraftSnapshot = async (
   }
   const headers = email.headers;
   const count = (name: string) => headers.filter((h) => h.key === name).length;
+  if (approved.parentMessageId && (count('in-reply-to') !== 1 || count('references') !== 1
+    || email.inReplyTo !== approved.parentMessageId || email.references !== approved.parentMessageId)) {
+    stop('reply parent differs from the approved thread context.');
+  }
   if (count("to") !== 1 || count("subject") !== 1 || count("content-type") !== 1
     || count("content-transfer-encoding") > 1 || count("from") > 1) {
     stop("required headers are missing or duplicated.");

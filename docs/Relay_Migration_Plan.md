@@ -13,7 +13,7 @@ Postgres and an operator UI remains an explicit product decision.
 | 1 | Outreach drafting through approved sending | Durable draft creation and actual-draft MIME preflight implemented with fake-Gmail verification; existing approval, queue, send, and reconciliation core retained. Deployment and controlled external acceptance remain |
 | 2 | Reply monitoring | Implemented locally: full-thread reading, durable inbound identities, cold-outreach suppression, bounded polling, and unavailable-thread handling. External acceptance and scheduling remain |
 | 3 | Classification and response drafts | Implemented locally: validated classification, exact-reply-bound review drafts, stale approval invalidation, opt-out/automatic-message safety, and durable creation journals. External acceptance and managed response approval/send remain |
-| 4 | Follow-up drafting and sending | Pending: local calendar dates, two-touch cap, newer-inbound preflight, explicit approval, durable claims, and uncertain-send recovery |
+| 4 | Follow-up drafting and sending | Implemented locally: explicit-zone calendar timing, two-touch cap, source-bound drafts/approval, live inbound/MIME preflight, durable send claims and uncertain-send holds. Deployment, scheduling, controlled external acceptance and guarded recovery remain |
 | 5 | Prospect research | Pending: OpenAI/Firecrawl, validated output schema, Drive briefs, missing-contact handling, durable artifact creation and resume/recovery |
 | 6 | Client onboarding | Pending: client identity, onboarding/task uniqueness, safe retries, and exact expected-task reconciliation |
 
@@ -343,4 +343,140 @@ also passed, including the additional CLI and in-progress-creation race tests.
 Typecheck and whitespace checks passed. All Gmail/classification providers were
 simulated; no real drafts, emails, or OpenAI requests were made. Migration 009
 was applied only to disposable local test databases, which were removed after
-verification. The step-3 changes remain uncommitted pending review.
+verification. The step-3 checkpoint was committed locally as `aac4ff8`.
+
+## Fourth slice: cold follow-up drafting and approved sending
+
+Apply `010_create_follow_up_pipeline.sql` before deploying this application
+version. It adds the discovery question, numbered follow-up drafts linked to
+their initial outreach, durable `follow_up_draft_requests`, and unique
+`follow_up_send_attempts` with the exact approved snapshot. Migration 010 has
+been tested only on disposable localhost Postgres, not the application database
+or droplet. Initial outreach and response processing remain separate pipelines.
+
+### Timing, scope and copy
+
+The first follow-up becomes due four local calendar days after the confirmed
+initial outreach. The second becomes due five local calendar days after the
+first **confirmed follow-up send**, not after drafting, approval, or an uncertain
+attempt. There is no third touch. These are calendar dates (eligible at local
+midnight), not fixed 96-/120-hour delays. IANA zone input is explicit and
+canonicalized; the first reservation binds the zone so later runs cannot shift
+it to bypass timing. `America/Denver` preserves the exported n8n behavior.
+
+There is no new `follow_up_due` prospect stage: the due date is derived from
+confirmed send history. Eligible prospects stay `outreach_sent` until replies or
+reconciliation change their state. The original n8n first/last-touch plain copy,
+first-name greeting, discovery question/default question, and signature are
+preserved. No AI or new paid provider is used. HTML-template parity is not
+included; drafts are plain text for strict content inspection.
+
+Exactly one confirmed initial outreach chain is required. Replies (including
+automatic replies), opt-outs, cold blocks, unhealthy thread checks, any response
+draft/history, ambiguous or legacy unnumbered follow-ups, inconsistent sequence,
+and unresolved creation/send state stop the operation. Existing follow-up data
+is not silently assigned sequence numbers or treated as a zero count.
+
+### Separate explicit commands
+
+Replace the UUIDs below with existing records. Planning only reads/locks database
+state; it does not contact Gmail. Drafting creates a Gmail draft for review.
+Approval is database-only and requires review of the exact stored destination,
+copy, signature, and thread. None of these commands queues work or enables a
+scheduler/worker.
+
+```bash
+npm run follow-up -- plan --prospect <UUID> --time-zone America/Denver
+npm run follow-up -- draft --prospect <UUID> --time-zone America/Denver --confirm-create-draft
+npm run follow-up -- approve --draft <UUID> --confirm-approve
+```
+
+An implemented `send --draft <UUID> --confirm-send` subcommand additionally checks
+the existing live-send environment guard **before loading database/Gmail
+dependencies**. This is a real send operation when deliberately enabled and
+invoked, not a preview. It has not been run live. Do not enable the live-send
+flag or invoke it as part of local verification; tests inject a fake Gmail API.
+The existing initial-outreach worker/operator does not handle follow-ups, and
+outreach-only not-sent reconciliation now explicitly rejects them.
+
+### Creation, approval and send safety
+
+Creating a draft checks live thread state before and after Gmail creation and
+commits a unique prospect/touch reservation before the non-idempotent POST.
+Requests retain authored content, parent IDs, zone/date, source-history hash,
+and returned Gmail IDs. Failed, uncertain or interrupted requests block another
+creation attempt. Returned IDs are retained where possible when finalization
+fails; a DB outage can leave a blocking `creating` reservation instead.
+
+Approval hashes the exact database content, destination, draft/thread identity,
+parent, sequence, date, zone, and source history. Changes to approved content or
+context do not inherit that approval. A send claim locks the prospect/drafts and
+persists a unique preflight attempt plus approved snapshot before Gmail reads.
+Concurrent or repeated invocations cannot acquire a second claim.
+
+Actual Gmail MIME preflight requires the approved recipient/copy/thread, no
+extra recipients or HTML/attachments, and the exact single `In-Reply-To` and
+`References` parent. After MIME inspection, a live full-thread read requires no
+inbound since initial outreach and no newer/untracked outbound mail. The last
+confirmed sent message must still be the exact parent; encoded subjects are
+decoded for comparison. Database eligibility, source history, and approval are
+rechecked before invocation. The inspected raw MIME snapshot is supplied to the
+send request, not reloaded from a potentially edited mailbox draft. Threading
+uses [Gmail's documented requirements](https://developers.google.com/workspace/gmail/api/guides/threads),
+and the final [draft-send request](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.drafts/send)
+has automatic transport retries disabled.
+
+A preflight stop records `blocked` and, if the claimed draft remains approved
+and unsent, returns it to `needs_edit`/`pending` without claiming an uncertain
+send. Concurrent review changes and existing send evidence are not overwritten.
+The attempt remains a durable retry block; correction/reapproval/recovery needs
+a separately reviewed operation, not another send invocation.
+
+Once the send endpoint is invoked, missing/partial/reused/wrong-thread IDs,
+transport errors and failed finalization require human reconciliation. Returned
+IDs are recorded in the attempt where possible. The draft and prospect are
+marked for send reconciliation where safe, without clearing reply/opt-out
+suppression. A complete database outage leaves `sending`/`invoking`, also a
+durable retry block. Confirmed sends are recorded even if a reply arrives during
+the request; existing reply/reconciliation stages and suppression remain.
+Lost commit acknowledgements do not downgrade a successfully persisted send.
+The attempt's approved snapshot retains the intended transmitted content for
+audit even if another tool edits database copy during the external call.
+
+The reply monitor revokes approval on pending unsent cold follow-up drafts when
+it sees an inbound reply, while preserving in-flight/uncertain/confirmed-send
+evidence. A live preflight cannot atomically lock Gmail against new mail: a reply
+can arrive between the last read and send, or while sending. This implementation
+does not promise cancellation of in-flight mail or zero cross-system race time.
+
+### Recovery and remaining acceptance
+
+Read-only inspection (do not delete history or reset state just to retry):
+
+```sql
+SELECT id, prospect_id, follow_up_number, status, time_zone, due_date,
+       gmail_draft_id, gmail_message_id, returned_gmail_thread_id, last_error
+FROM follow_up_draft_requests ORDER BY created_at DESC;
+
+SELECT draft_id, status, sent_message_id, gmail_thread_id, last_error
+FROM follow_up_send_attempts ORDER BY created_at DESC;
+```
+
+Inspect Gmail, creation requests, send attempts and draft evidence together.
+The exact approved snapshot contains private message content; keep its access
+restricted and do not paste it into general logs. There is deliberately no
+automatic retry/reset/requeue or follow-up recovery command. The initial-outreach
+recovery tool is not a substitute. If an acknowledgement was lost, the row may
+already be `created`/`sent` despite a command error. Inspect before any recovery.
+
+No production migrations, live Gmail operations, worker activation, timer/Docker
+deployment, Airtable integration, or Gmail-label updates are included. Controlled
+mailbox acceptance and guarded recovery tooling remain required before launch.
+
+Verification on October 16, 2026: 250/250 full regression tests passed on
+disposable localhost Postgres. The final 29-test follow-up subset also passed
+after adding the reused-send-ID guard. Typecheck and whitespace checks passed.
+All Gmail create/read/send interfaces in these tests were fakes. No live flag,
+production migration, scheduler, worker, or external mailbox operation was enabled
+or run. The disposable test database was removed after verification. The step-4
+implementation is not production-certified by these local results.

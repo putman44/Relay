@@ -24,6 +24,7 @@ export type ApprovedGmailDraft = {
   subject: string;
   body: string;
   threadId: string | null;
+  parentMessageId?: string;
 };
 
 export type GmailResultFinalizer = (
