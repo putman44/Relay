@@ -18,11 +18,15 @@ async function main() {
     const { createFirecrawlScraper } = await import('../src/research/firecrawl-scraper.js');
     const { createOpenAIResearcher } = await import('../src/research/openai-researcher.js');
     const { createResearchDrive } = await import('../src/research/drive-artifacts.js');
-    const { createProductionGmailDraftCreator } = await import('../src/gmail/gmail-runtime.js');
+    const safeResearch = command.action === 'start-safe';
+    const createGmailDraft = safeResearch
+      ? async () => { throw new Error('Gmail draft creation is disabled for safe research.'); }
+      : (await import('../src/gmail/gmail-runtime.js')).createProductionGmailDraftCreator();
     const deps = { database: db, scrape: createFirecrawlScraper(), research: createOpenAIResearcher(),
-      drive: createResearchDrive(), createGmailDraft: createProductionGmailDraftCreator(),
-      driveParentId: process.env.RELAY_RESEARCH_DRIVE_PARENT_ID ?? '' };
-    const request = command.action === 'start'
+      drive: createResearchDrive(), createGmailDraft,
+      driveParentId: process.env.RELAY_RESEARCH_DRIVE_PARENT_ID ?? '',
+      ...(safeResearch ? { draftMode: 'research_only' as const } : {}) };
+    const request = command.action === 'start' || command.action === 'start-safe'
       ? await startProspectResearch(command.prospectId, deps)
       : command.action === 'retry-pre-artifact'
         ? await retryFailedPreArtifactResearch(command.requestId, deps)
