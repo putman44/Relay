@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { collectResearchEvidence, safeResearchUrl } from '../../src/research/research-evidence.js';
+import { collectResearchEvidence, equivalentResearchSourceUrl, safeResearchUrl } from '../../src/research/research-evidence.js';
 import { renderResearchBrief, ResearchValidationError, validateResearchResult,
   type ResearchResult } from '../../src/research/research-result.js';
 import { createFirecrawlScraper } from '../../src/research/firecrawl-scraper.js';
@@ -42,6 +42,13 @@ test('Research URLs and crawl stay on safe discovered pages', async () => {
   assert.deepEqual(calls, [root, contact]);
   assert.equal(pages.pages.length, 2);
   assert.ok(pages.limitations.some(item => item.includes('outside the safe same-site page scope')));
+});
+
+test('Research accepts only equivalent apex/www source URLs', () => {
+  assert.equal(equivalentResearchSourceUrl('https://business.example.com/', 'https://www.business.example.com/'), true);
+  assert.equal(equivalentResearchSourceUrl('https://www.business.example.com/contact/', 'https://business.example.com/contact'), true);
+  assert.equal(equivalentResearchSourceUrl('https://business.example.com/contact', 'https://www.business.example.com/about'), false);
+  assert.equal(equivalentResearchSourceUrl('https://business.example.com/', 'https://evil.example.com/'), false);
 });
 
 test('Research follows branded same-site pages and prioritizes contact paths within its budget', async () => {
@@ -162,6 +169,12 @@ test('Firecrawl adapter accepts only a successful matching source', async () => 
     } }) };
   });
   assert.equal((await scraper(root)).url, root);
+
+  const canonical = createFirecrawlScraper('fake-key', async () => ({ ok: true,
+    text: async () => JSON.stringify({ success: true, data: { markdown: 'Business', links: [],
+      metadata: { sourceURL: 'https://www.business.example.com/', url: 'https://www.business.example.com/', statusCode: 200 } } }) }));
+  assert.equal((await canonical(root)).url, root);
+
   await assert.rejects(createFirecrawlScraper('fake-key', async () => ({ ok: true,
     text: async () => JSON.stringify({ success: true, data: { markdown: 'Wrong', links: [],
       metadata: { sourceURL: 'https://evil.test/', statusCode: 200 } } }) }))(root));
