@@ -190,7 +190,11 @@ test('OpenAI research adapter is tool-free and requires one completed text resul
 test('Research CLI requires explicit confirmation before provider access', () => {
   const id = randomUUID();
   assert.deepEqual(parseResearchArgs(['start', '--prospect', id, '--confirm-research']), { action: 'start', prospectId: id });
+  assert.deepEqual(parseResearchArgs(['start-safe', '--prospect', id, '--confirm-research-only']),
+    { action: 'start-safe', prospectId: id });
   assert.throws(() => parseResearchArgs(['start', '--prospect', id]));
+  assert.throws(() => parseResearchArgs(['start-safe', '--prospect', id]));
+  assert.throws(() => parseResearchArgs(['start-safe', '--prospect', id, '--confirm-research']));
   assert.throws(() => parseResearchArgs(['resume', '--request', id]));
   assert.deepEqual(parseResearchArgs(['retry-pre-artifact', '--request', id, '--confirm-retry-pre-artifact']),
     { action: 'retry-pre-artifact', requestId: id });
