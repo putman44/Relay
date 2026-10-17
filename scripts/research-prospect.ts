@@ -5,7 +5,7 @@ async function main() {
   const command = parseResearchArgs(process.argv.slice(2));
   const { db } = await import('../src/db.js');
   try {
-    const { getResearchRequest, startProspectResearch, resumeProspectResearch } =
+    const { getResearchRequest, startProspectResearch, resumeProspectResearch, retryFailedPreArtifactResearch } =
       await import('../src/research/prospect-research.js');
     if (command.action === 'status') {
       const request = await getResearchRequest(command.prospectId, db);
@@ -24,7 +24,9 @@ async function main() {
       driveParentId: process.env.RELAY_RESEARCH_DRIVE_PARENT_ID ?? '' };
     const request = command.action === 'start'
       ? await startProspectResearch(command.prospectId, deps)
-      : await resumeProspectResearch(command.requestId, deps);
+      : command.action === 'retry-pre-artifact'
+        ? await retryFailedPreArtifactResearch(command.requestId, deps)
+        : await resumeProspectResearch(command.requestId, deps);
     console.log(JSON.stringify({ id: request.id, prospectId: request.prospect_id, status: request.status,
       folderId: request.folder_id, briefId: request.brief_id, briefUrl: request.brief_url,
       gmailDraftId: request.gmail_draft_id }));

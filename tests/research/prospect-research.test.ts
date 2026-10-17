@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { test } from 'node:test';
 import { Pool } from 'pg';
-import { startProspectResearch, resumeProspectResearch, type ResearchDependencies } from '../../src/research/prospect-research.js';
+import { startProspectResearch, resumeProspectResearch, retryFailedPreArtifactResearch,
+  type ResearchDependencies } from '../../src/research/prospect-research.js';
 import type { DriveArtifact } from '../../src/research/drive-artifacts.js';
 
 test('Prospect research journals external artifacts and creates only review drafts', {
@@ -44,6 +45,7 @@ test('Prospect research journals external artifacts and creates only review draf
     return id;
   };
   const artifacts = new Map<string, DriveArtifact>();
+  const briefs = new Map<string, string>();
   const calls = { folder: 0, brief: 0, gmail: 0, research: 0 };
   let output = fixtureResult('hello@business.testsite.org');
   let failGmail = false;
@@ -69,6 +71,7 @@ test('Prospect research journals external artifacts and creates only review draf
       createBrief: async (id, folderId, _name, text) => {
         calls.brief++;
         assert.match(text, /SOURCES/);
+        briefs.set(id, text);
         const artifact: DriveArtifact = { id: randomUUID().replaceAll('-', ''), mimeType: 'application/vnd.google-apps.document',
           parents: [folderId], appProperties: { relayResearchRequestId: id, relayArtifactKind: 'brief' },
           webViewLink: 'https://docs.google.com/document/d/fake/edit' };
@@ -148,11 +151,100 @@ test('Prospect research journals external artifacts and creates only review draf
 
   await t.test('C fit requires research review without a draft', async () => {
     const id = await insertProspect();
-    output = fixtureResult('hello@business.testsite.org', 'C');
+    output = fixtureResult('', 'C');
     const before = calls.gmail;
     const request = await startProspectResearch(id, deps);
     assert.equal(request.status, 'research_review');
     assert.equal(calls.gmail, before);
+    const brief = briefs.get(request.id);
+    assert.ok(brief);
+    assert.match(brief, /SELECTED CONTACT\nName: Unknown\nRole: Unknown\nEmail: Not assigned/);
+    assert.match(brief, /PUBLIC CONTACT LINKS \(NOT ATTRIBUTED TO THE SELECTED CONTACT\)\n- Email: hello@business\.testsite\.org \(https:\/\/business\.testsite\.org\/contact\)/);
+    assert.doesNotMatch(brief, /PROPOSED OUTREACH FOR HUMAN REVIEW|Question about inquiries/);
+  });
+
+  await t.test('research-only mode saves the brief but never creates a Gmail draft for a public contact', async () => {
+    const id = await insertProspect();
+    output = fixtureResult('hello@business.testsite.org', 'A');
+    const before = calls.gmail;
+    const request = await startProspectResearch(id, { ...deps, draftMode: 'research_only' });
+    assert.equal(request.status, 'research_review');
+    assert.ok(request.folder_id);
+    assert.ok(request.brief_id);
+    assert.equal(request.gmail_draft_id, null);
+    assert.equal(calls.gmail, before);
+    assert.equal((await database.query('SELECT count(*) FROM message_drafts WHERE prospect_id = $1', [id])).rows[0].count, '0');
+    assert.equal((await database.query('SELECT stage FROM prospects WHERE id = $1', [id])).rows[0].stage, 'research_review');
+  });
+
+  await t.test('failed validation keeps a safe code and explicitly retries the same pre-artifact request', async () => {
+    const id = await insertProspect();
+    output = { ...fixtureResult(''), outreachSubject: '' };
+    const before = { ...calls };
+    await assert.rejects(startProspectResearch(id, deps), /failed validation or collection/);
+    const saved = (await database.query('SELECT * FROM prospect_research_requests WHERE prospect_id = $1', [id])).rows[0];
+    assert.equal(saved.status, 'failed');
+    assert.equal(saved.last_error, 'Research result validation failed: outreach_copy.');
+    assert.equal(saved.folder_id, null);
+    assert.equal(saved.brief_id, null);
+    assert.equal(saved.gmail_draft_id, null);
+    assert.equal(calls.folder, before.folder);
+    assert.equal(calls.brief, before.brief);
+    assert.equal(calls.gmail, before.gmail);
+    await assert.rejects(resumeProspectResearch(saved.id, deps));
+
+    output = fixtureResult('');
+    const retried = await retryFailedPreArtifactResearch(saved.id, deps);
+    assert.equal(retried.id, saved.id);
+    assert.equal(retried.status, 'needs_contact');
+    assert.ok(retried.folder_id);
+    assert.ok(retried.brief_id);
+    assert.equal(retried.gmail_draft_id, null);
+    assert.equal(retried.last_error, saved.last_error);
+    assert.equal(calls.research, before.research + 2);
+    assert.equal(calls.folder, before.folder + 1);
+    assert.equal(calls.brief, before.brief + 1);
+    assert.equal(calls.gmail, before.gmail);
+    assert.equal((await database.query('SELECT count(*) FROM prospect_research_requests WHERE prospect_id = $1',
+      [id])).rows[0].count, '1');
+    await assert.rejects(retryFailedPreArtifactResearch(saved.id, deps));
+  });
+
+  await t.test('pre-artifact retry rejects artifact markers, changed input, and concurrent retries', async () => {
+    const makeFailed = async () => {
+      const id = await insertProspect(), requestId = randomUUID();
+      await database.query("UPDATE prospects SET stage = 'research_review' WHERE id = $1", [id]);
+      await database.query(`INSERT INTO prospect_research_requests
+        (id,prospect_id,status,owner_token,input_snapshot,drive_parent_id,last_error)
+        VALUES ($1,$2,'failed',$3,$4,$5,$6)`,
+      [requestId,id,randomUUID(),JSON.stringify({ company_name: 'Research Fixture', website: root,
+        industry: null, contact_email: null, contact_name: null, primary_discovery_question: null }),
+      parent,'Research result validation failed: outreach_copy.']);
+      return { id, requestId };
+    };
+    const artifact = await makeFailed();
+    await database.query('UPDATE prospect_research_requests SET folder_id = $2 WHERE id = $1',
+      [artifact.requestId, 'untracked-folder']);
+    const before = { ...calls };
+    await assert.rejects(retryFailedPreArtifactResearch(artifact.requestId, deps), /pre-artifact/);
+    const changed = await makeFailed();
+    await database.query('UPDATE prospects SET company_name = $2 WHERE id = $1', [changed.id, 'Changed']);
+    await assert.rejects(retryFailedPreArtifactResearch(changed.requestId, deps), /pre-artifact/);
+    const wrongParent = await makeFailed();
+    await assert.rejects(retryFailedPreArtifactResearch(wrongParent.requestId,
+      { ...deps, driveParentId: 'differentparent12345' }), /pre-artifact/);
+    assert.deepEqual(calls, before);
+
+    const concurrent = await makeFailed();
+    output = fixtureResult('');
+    const settled = await Promise.allSettled([
+      retryFailedPreArtifactResearch(concurrent.requestId, deps),
+      retryFailedPreArtifactResearch(concurrent.requestId, deps),
+    ]);
+    assert.equal(settled.filter(item => item.status === 'fulfilled').length, 1);
+    assert.equal(calls.folder, before.folder + 1);
+    assert.equal(calls.brief, before.brief + 1);
+    assert.equal(calls.gmail, before.gmail);
   });
 
   await t.test('uncertain Gmail result keeps its durable claim and blocks another draft', async () => {

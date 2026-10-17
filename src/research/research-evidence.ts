@@ -4,7 +4,9 @@ export type ResearchPage = { url: string; markdown: string; links: string[] };
 export type ResearchEvidence = { pages: ResearchPage[]; limitations: string[] };
 export type PageScraper = (url: string) => Promise<ResearchPage>;
 
-const RELEVANT = /(?:contact|about|services?|quote|book|appointment|emergency|team|locations?|faq)/i;
+const CONTACT_PATH = /(?:^|\/)(?:contact|quote|estimate|request|book|appointment|schedule|consultation|get-in-touch)(?=$|[\/-])/i;
+const BUSINESS_PATH = /(?:^|\/)(?:about|services?|solutions?|offerings?|products?|pricing|emergency|team|locations?|faq)(?=$|[\/-])/i;
+const NON_PAGE_PATH = /\.(?:pdf|png|jpe?g|gif|webp|svg|ico|css|js|zip|mp[34]|mov)$/i;
 const ACTION = /(?:login|logout|sign-?in|account|cart|checkout|delete|admin|wp-admin|subscribe|unsubscribe|payment|pay)/i;
 
 export function safeResearchUrl(raw: string, origin?: string): string {
@@ -50,24 +52,38 @@ export async function collectResearchEvidence(seedUrl: string, scrape: PageScrap
   const limitations: string[] = [];
   const first = await scrape(root);
   pages.push(validateResearchEvidence({ pages: [first], limitations }, root).pages[0]!);
-  const candidates = new Set<string>();
+  const candidates = new Map<string, { priority: number; order: number }>();
+  let outsideSafeScope = 0;
+  let nonPageLinks = 0;
   for (const link of first.links) {
     try {
       const candidate = safeResearchUrl(new URL(link, root).href, origin);
-      if (candidate !== root && RELEVANT.test(new URL(candidate).pathname)) candidates.add(candidate);
-    } catch { /* Off-site, mailto, private and action links are never scraped. */ }
+      if (candidate === root || candidates.has(candidate)) continue;
+      const path = new URL(candidate).pathname;
+      if (NON_PAGE_PATH.test(path)) { nonPageLinks++; continue; }
+      const priority = CONTACT_PATH.test(path) ? 0 : BUSINESS_PATH.test(path) ? 1 : 2;
+      candidates.set(candidate, { priority, order: candidates.size });
+    } catch { outsideSafeScope++; /* Off-site, mailto, private and action links are never scraped. */ }
   }
-  for (const candidate of [...candidates].slice(0, 4)) {
+  const ranked = [...candidates].sort((a, b) => a[1].priority - b[1].priority || a[1].order - b[1].order);
+  const selected = ranked.slice(0, 4);
+  for (const [candidate] of selected) {
     try {
       const page = await scrape(candidate);
       if (page.url !== candidate) throw new Error('The scrape returned a different source URL.');
       validateResearchEvidence({ pages: [first, page], limitations }, root);
       pages.push(page);
     } catch {
-      limitations.push(`Could not verify ${candidate}.`);
+      limitations.push(`Could not verify selected page ${candidate.slice(0, 300)}.`);
     }
   }
-  if (pages.length === 1) limitations.push('No additional relevant page could be verified.');
+  if (ranked.length > selected.length) {
+    limitations.push(`Skipped ${ranked.length - selected.length} safe same-site pages because of the four-page follow-up limit.`);
+  }
+  if (outsideSafeScope) limitations.push(`Skipped ${outsideSafeScope} links outside the safe same-site page scope.`);
+  if (nonPageLinks) limitations.push(`Skipped ${nonPageLinks} non-page asset links.`);
+  if (!selected.length) limitations.push('No additional safe same-site page was selected from the starting page.');
+  else if (pages.length === 1) limitations.push('No selected secondary page could be verified.');
   return validateResearchEvidence({ pages, limitations }, root);
 }
 

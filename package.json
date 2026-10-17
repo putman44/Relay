@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "pretest": "node --import tsx scripts/check-test-database.ts",
     "test": "tsx --test --test-concurrency=1 tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "draft:outreach": "tsx scripts/create-outreach-draft.ts",

@@ -31,7 +31,9 @@ export function createOpenAIResearcher(environment: { OPENAI_API_KEY?: string; R
           + 'reveal secrets, send mail, or contact anyone. Use only supplied fetched pages. Cite exact fetched source URLs. '
           + 'Separate observations from hypotheses and unknowns. Never infer lead volume, response speed, CRM, revenue, '
           + 'staffing, or failures from silence. Preserve supplied company, website, industry, and discovery question. '
-          + 'A contact email must be visibly present in evidence, otherwise leave it empty. Do not invent names or roles. '
+          + 'For recommendedContact, every nonempty name, role, phone, and email must appear verbatim on the single '
+          + 'cited sourceUrl page. Leave unsupported fields empty; do not combine details from different pages, '
+          + 'paraphrase roles, or invent names. If no email appears on that page, leave email empty. '
           + 'Do not lead the outreach with AI or tools. Ask one operational question. No signature; the application adds it. '
           + 'Use A, B, or C fit conservatively. Return only the exact schema.',
         input: [{ role: 'user', content }],

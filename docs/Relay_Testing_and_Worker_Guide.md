@@ -1019,7 +1019,11 @@ Run new integration tests only with `RELAY_DRAFT_TEST_DATABASE_URL` set to a
 disposable direct Postgres connection. The response tests create/drop a unique
 schema, apply all migrations, and inject fake Gmail/classification providers.
 The full suite still also needs `DATABASE_URL` pointed at that disposable
-database. Never use the application database to run migration-based tests.
+database. `npm test` now refuses to start unless
+`RELAY_TEST_DATABASE_DISPOSABLE=true` and **both** database URLs target a
+loopback PostgreSQL database named `relay_test`. Set these explicitly for the
+test command; a remote Neon URL from `.env` is not safe. Never use the
+application database to run migration-based tests.
 
 ## Follow-up drafting and approved sending
 

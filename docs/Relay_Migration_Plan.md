@@ -27,19 +27,28 @@ have replacements or are explicitly removed from scope.
 Migration 011 adds the `research_in_progress`, `needs_contact`, and
 `research_review` stages, an `industry` field, and one durable research request
 per prospect. Apply it through the reviewed migration process before running
-the new `npm run research` command. It has been applied only to disposable local
-Postgres for testing; the application database and droplet are unchanged.
+the new `npm run research` command. Migrations 007-011 were applied to the
+development Neon database on October 16, 2026; production Neon and the droplet
+are unchanged.
 
 `start` requires a researching prospect with a supplied HTTPS business website,
 an explicit Drive parent folder ID, and a confirmation flag. It reserves the
 prospect before any provider call. Relay scrapes the supplied website and up to
-four relevant links actually discovered on its first page. It stays on the same
-origin and does not run the old n8n general web search or map phase. Firecrawl
+four safe same-origin page links discovered on its first page. Contact and
+inquiry paths rank first, then business/service paths; other safe page links
+fill remaining slots in their discovered order. Asset links are excluded.
+The saved evidence reports skipped out-of-scope links, assets, and pages beyond
+the four-page follow-up limit separately from pages that were selected but
+failed verification. It does not run the old n8n general web search or map phase. Firecrawl
 scrape responses must report the exact requested source URL and successful HTTP
 status. The model receives only those saved pages, has no tools, and must return
 the exact research schema. Relay validates sources against fetched pages and
 requires a recommended email to appear on its cited page. This is structural
 evidence checking; a person must still assess whether claims and copy are true.
+The model is instructed to cite one page containing every nonempty contact
+field. Relay omits name, role, or phone details not visible verbatim on that
+page, records that omission in the brief when space permits, and still rejects
+an email that is not publicly evidenced on the cited page.
 
 After validation, Relay creates a Drive folder, a Google Docs research brief,
 and, only for A/B fit with a publicly evidenced contact email, a plain-text
@@ -48,8 +57,15 @@ Fit C ends in `research_review`; missing email ends in `needs_contact`. Both
 retain the brief and create no Gmail draft. Supplied contact, industry, and
 discovery question fields are never replaced by model suggestions. A conflicting
 contact fails validation and holds the request for human inspection. The brief
-retains observations, hypotheses, unknowns, citations, outreach copy, and
-limitations. Gmail copy receives the existing authored Relay signature.
+retains observations, hypotheses, unknowns, citations, and limitations. It
+lists evidenced public email and phone links with their source pages separately
+from the selected contact record. Proposed outreach appears only for A/B fit
+outside the Dev by Taylor site; it is omitted for C fit and owned-site research.
+Gmail copy receives the existing authored Relay signature.
+For a controlled research-only acceptance run, an explicit dependency mode
+stops after verified Drive artifacts in `research_review`, regardless of fit or
+public contact; it never enters Gmail draft creation. The normal CLI path does
+not enable this mode.
 
 Each external create call has a committed `*_creating` state first and disables
 automatic transport retries. Returned IDs are retained if local finalization
@@ -61,36 +77,48 @@ the request or start under a new ID to bypass a hold. `resume` accepts only
 It verifies existing Drive artifact IDs and parents before later writes. It
 never retries `*_creating` or `needs_reconciliation` automatically. Drive
 artifact metadata includes the research request ID to aid manual inspection.
+Failed collection or model validation occurs before Drive/Gmail artifact creation.
+Validation failures retain a field-level code in `last_error`, without storing
+the rejected model response. After inspecting the exact request and prospect,
+`retry-pre-artifact` can explicitly reuse that same failed request ID only if
+the input is unchanged, no artifact identities or outreach drafts exist, the
+prospect is not suppressed, and the configured Drive parent still matches.
+It never retries an uncertain external create; the prior error remains on the
+request as an audit note after a successful retry.
 
 Configuration: `DATABASE_URL`, `FIRECRAWL_API_KEY`, `OPENAI_API_KEY`, an explicit
 `RELAY_RESEARCH_MODEL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-`GOOGLE_REFRESH_TOKEN`, and `RELAY_RESEARCH_DRIVE_PARENT_ID`. The existing Google
+`GOOGLE_REFRESH_TOKEN`, and `RELAY_RESEARCH_DRIVE_PARENT_ID`. A deployment Google
 refresh token may lack Drive authorization. `scripts/authorize-gmail.ts
 --include-drive-file` requests the Gmail compose and Drive file scopes, but a
 `drive.file` token must also be able to access the chosen parent folder; verify
-this during controlled acceptance. No secret or real prospect input is stored
+this in each deployment environment. No secret or real prospect input is stored
 in the repository.
 
 ```bash
 npm run research -- status --prospect PROSPECT_UUID
 npm run research -- start --prospect PROSPECT_UUID --confirm-research
 npm run research -- resume --request REQUEST_UUID --confirm-resume
+npm run research -- retry-pre-artifact --request REQUEST_UUID --confirm-retry-pre-artifact
 ```
 
-The latter two commands can incur Firecrawl/OpenAI usage and create Drive/Gmail
-artifacts; they have not been run against live accounts. The status command
-prints IDs and state without exposing the research content. A blocked or failed
-request requires manual evidence review before any recovery design. Firecrawl
+The three mutation commands can incur Firecrawl/OpenAI usage and create Drive/Gmail
+artifacts. The status command prints IDs and state without exposing the research
+content. Inspect a failed request before the explicit pre-artifact retry; never
+use it for `*_creating`, `needs_reconciliation`, or a request with artifact IDs. Firecrawl
 may follow redirects or resolve DNS inside its service; Relay validates the
 requested and reported source URL but cannot prove Firecrawl's internal fetch
-path. The next acceptance pass must verify Drive scopes/parent access, actual
-Google Docs conversion, Gmail draft appearance and MIME, output quality on a
-test prospect, and operator review before enabling any production workflow.
+path. A controlled development run on the owned Dev by Taylor site verified
+Firecrawl/OpenAI research, three saved pages, Drive parent access, and a Google
+Docs brief. It used research-only mode and created no Gmail draft or send job.
+Production still needs its own read-only configuration/schema preflight and a
+separately approved rollout; Gmail draft appearance and operator review remain
+unverified for this research path.
 
-Local verification on October 16, 2026: typecheck and 263/263 full regression
-tests passed. Research tests use fake Firecrawl, OpenAI, Drive, and Gmail
-providers plus disposable localhost Postgres. No live provider request,
-production migration, send, or worker execution was part of this step.
+Local verification on October 17, 2026: typecheck and 272/272 full regression
+tests passed. Research integration tests use fake Firecrawl, OpenAI, Drive, and
+Gmail providers plus disposable localhost Postgres. The test run made no live
+provider request, production migration, send, or worker invocation.
 
 ## First slice: supplied outreach copy to a reviewable Gmail draft
 
@@ -123,8 +151,8 @@ history or use a new request ID as a way to bypass a blocked prospect.
 
 Apply `migrations/007_create_outreach_draft_requests.sql` through the normal
 reviewed migration process before using the command. This migration was tested
-only on disposable localhost Postgres; it has not been applied to the configured
-application database or the droplet. Grant the drafting application the required
+on disposable localhost Postgres and applied to development Neon; production
+Neon and the droplet remain unchanged. Grant the drafting application the required
 table privileges; the read-only Docker monitor does not need access to this table.
 
 ### Explicit draft-creation command
@@ -226,7 +254,10 @@ npx tsx --test --test-concurrency=1 tests/gmail/gmail-draft-creator.test.ts test
 
 For a fully isolated regression run, provision a disposable database with all
 migrations and set both `DATABASE_URL` and `RELAY_DRAFT_TEST_DATABASE_URL` to its
-direct connection URL before `npm test`. Existing tests use `DATABASE_URL`.
+direct loopback connection URL before `npm test`. Also set
+`RELAY_TEST_DATABASE_DISPOSABLE=true`; the pretest guard rejects a missing
+confirmation, remote host, or database name other than `relay_test`. Existing
+tests use `DATABASE_URL`.
 
 ## Second slice: reply monitoring
 

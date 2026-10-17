@@ -6,7 +6,7 @@ import { responseBodyWithSignature } from '../outreach/reply-context.js';
 import { collectResearchEvidence, safeResearchUrl, validateResearchEvidence,
   type PageScraper, type ResearchEvidence } from './research-evidence.js';
 import { validateDriveArtifact, validDriveId, type DriveArtifact, type ResearchDrive } from './drive-artifacts.js';
-import { renderResearchBrief, validateResearchResult, type ResearchResult } from './research-result.js';
+import { renderResearchBrief, ResearchValidationError, validateResearchResult, type ResearchResult } from './research-result.js';
 import type { ResearchInput, Researcher } from './openai-researcher.js';
 
 type Status = 'researching' | 'research_ready' | 'folder_creating' | 'folder_ready' | 'brief_creating'
@@ -22,7 +22,8 @@ export type ResearchRequest = {
 type ProspectRow = ResearchInput & { id: string; stage: string; cold_outreach_blocked: boolean;
   communication_opted_out: boolean };
 export type ResearchDependencies = { database: Pool; scrape: PageScraper; research: Researcher;
-  drive: ResearchDrive; createGmailDraft: GmailDraftCreator; driveParentId: string };
+  drive: ResearchDrive; createGmailDraft: GmailDraftCreator; driveParentId: string;
+  draftMode?: 'research_only' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const snapshot = (row: ResearchInput): ResearchInput => ({ company_name: row.company_name, website: row.website,
@@ -135,6 +136,43 @@ export async function resumeProspectResearch(requestId: string, deps: ResearchDe
   return runResearch(requestId, owner, deps);
 }
 
+// Only a failed research/validation attempt can use this path. External artifact
+// creation begins later, in research_ready, and all artifact identities must
+// still be absent. Keep the same request ID so a retry cannot evade its journal.
+export async function retryFailedPreArtifactResearch(requestId: string, deps: ResearchDependencies): Promise<ResearchRequest> {
+  if (!UUID.test(requestId) || !validDriveId(deps.driveParentId)) {
+    throw new Error('Valid research request and Drive parent IDs are required.');
+  }
+  const owner = randomUUID();
+  await transaction(deps.database, async client => {
+    const selected = (await client.query<ResearchRequest>(
+      'SELECT * FROM prospect_research_requests WHERE id = $1', [requestId])).rows[0];
+    if (!selected) throw new Error('Research request does not exist.');
+    const prospect = (await client.query<ProspectRow>('SELECT * FROM prospects WHERE id = $1 FOR UPDATE',
+      [selected.prospect_id])).rows[0];
+    const request = (await client.query<ResearchRequest>(
+      'SELECT * FROM prospect_research_requests WHERE id = $1 FOR UPDATE', [requestId])).rows[0];
+    if (!prospect || !request || request.status !== 'failed' || prospect.stage !== 'research_review'
+      || request.drive_parent_id !== deps.driveParentId || prospect.cold_outreach_blocked
+      || prospect.communication_opted_out || !sameSnapshot(prospect, request.input_snapshot)
+      || request.evidence || request.result || request.folder_id || request.brief_id || request.brief_url
+      || request.gmail_draft_id || request.gmail_message_id || request.gmail_thread_id) {
+      throw new Error('Only a failed, unchanged pre-artifact research request can be retried.');
+    }
+    const conflict = await client.query(`SELECT 1 FROM outreach_draft_requests WHERE prospect_id = $1
+      UNION ALL SELECT 1 FROM message_drafts WHERE prospect_id = $1 AND draft_type = 'outreach' LIMIT 1`,
+    [prospect.id]);
+    if (conflict.rowCount) throw new Error('Existing outreach activity blocks research retry.');
+    const restarted = await client.query(`UPDATE prospect_research_requests
+      SET status = 'researching', owner_token = $2, updated_at = now()
+      WHERE id = $1 AND status = 'failed' RETURNING id`, [requestId, owner]);
+    const restored = await client.query(`UPDATE prospects SET stage = 'research_in_progress', updated_at = now()
+      WHERE id = $1 AND stage = 'research_review' RETURNING id`, [prospect.id]);
+    if (restarted.rowCount !== 1 || restored.rowCount !== 1) throw new Error('Research retry state changed.');
+  });
+  return runResearch(requestId, owner, deps);
+}
+
 export async function getResearchRequest(prospectId: string, database: Pool): Promise<ResearchRequest | null> {
   if (!UUID.test(prospectId)) throw new Error('Valid prospect ID required.');
   return (await database.query<ResearchRequest>('SELECT * FROM prospect_research_requests WHERE prospect_id = $1',
@@ -199,12 +237,14 @@ async function runResearch(id: string, owner: string, deps: ResearchDependencies
       request = await advance(deps.database, id, owner, 'researching', 'research_ready',
         { evidence: JSON.stringify(evidence), result: JSON.stringify(result) });
     } catch (error) {
+      const reason = error instanceof ResearchValidationError
+        ? error.message : 'Research or provider failed; inspect before new work.';
       try {
         await transaction(deps.database, async client => {
           const { prospect } = await locked(client, id, owner, 'researching');
           await client.query(`UPDATE prospect_research_requests SET status = 'failed',
-            last_error = 'Research or validation failed; inspect before new work.', updated_at = now()
-            WHERE id = $1 AND owner_token = $2 AND status = 'researching'`, [id, owner]);
+            last_error = $3, updated_at = now()
+            WHERE id = $1 AND owner_token = $2 AND status = 'researching'`, [id, owner, reason]);
           await client.query("UPDATE prospects SET stage = 'research_review', updated_at = now() WHERE id = $1", [prospect.id]);
         });
       } catch { /* The reservation still blocks a duplicate request. */ }
@@ -257,6 +297,9 @@ async function runResearch(id: string, owner: string, deps: ResearchDependencies
     } catch (error) {
       await hold(deps.database, id, owner, 'brief_ready');
       throw new Error(`Research artifacts for ${id} could not be verified.`, { cause: error });
+    }
+    if (deps.draftMode === 'research_only') {
+      return finishWithoutDraft(deps.database, id, owner, result, 'research_review');
     }
     if (result.fit === 'C') return finishWithoutDraft(deps.database, id, owner, result, 'research_review');
     if (!result.recommendedContact.email) return finishWithoutDraft(deps.database, id, owner, result, 'needs_contact');
