@@ -46,6 +46,21 @@ test('Research URLs and crawl stay on safe discovered pages', async () => {
   assert.ok(pages.limitations.some(item => item.includes('outside the safe same-site page scope')));
 });
 
+test('Research crawl treats apex and www as one site under the same scheme', async () => {
+  for (const [site, alternate] of [['https://example.com/', 'https://www.example.com/'],
+    ['https://www.example.com/', 'https://example.com/']] as const) {
+    const calls: string[] = [];
+    const collected = await collectResearchEvidence(site, async url => {
+      calls.push(url);
+      return { url, markdown: `Public page at ${url}`, links: url === site ? [`${alternate}contact`,
+        'https://www.example.net/contact', `http://${new URL(alternate).hostname}/services`] : [] };
+    });
+    assert.deepEqual(calls, [site, `${alternate}contact`]);
+    assert.deepEqual(collected.pages.map(page => page.url), [site, `${alternate}contact`]);
+    assert.ok(collected.limitations.includes('Skipped 2 links outside the safe same-site page scope.'));
+  }
+});
+
 test('Research accepts only equivalent apex/www source URLs', () => {
   assert.equal(equivalentResearchSourceUrl('https://business.example.com/', 'https://www.business.example.com/'), true);
   assert.equal(equivalentResearchSourceUrl('https://www.business.example.com/contact/', 'https://business.example.com/contact'), true);
