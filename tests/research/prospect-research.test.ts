@@ -17,7 +17,23 @@ test('Prospect research journals external artifacts and creates only review draf
   t.after(async () => { await database.end(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.end(); });
   const dir = new URL('../../migrations/', import.meta.url);
   const migrations = (await readdir(dir)).filter(name => /^\d+.*\.sql$/.test(name)).sort();
-  for (const name of migrations) await database.query(await readFile(new URL(name, dir), 'utf8'));
+  const policyMigration = '013_add_research_gmail_draft_policy.sql';
+  for (const name of migrations.filter(name => name !== policyMigration)) {
+    await database.query(await readFile(new URL(name, dir), 'utf8'));
+  }
+  const migratedProspectId = randomUUID(), migratedRequestId = randomUUID();
+  await database.query('INSERT INTO prospects (id, company_name, website) VALUES ($1,$2,$3)',
+    [migratedProspectId, 'Pre-migration Fixture', 'https://pre-migration.testsite.org/']);
+  await database.query(`INSERT INTO prospect_research_requests
+    (id,prospect_id,status,owner_token,input_snapshot,drive_parent_id)
+    VALUES ($1,$2,'researching',$3,$4,$5)`,
+  [migratedRequestId,migratedProspectId,randomUUID(),JSON.stringify({ company_name: 'Pre-migration Fixture',
+    website: 'https://pre-migration.testsite.org/', industry: null, contact_email: null, contact_name: null,
+    primary_discovery_question: null }),'parentfolder12345']);
+  await database.query(await readFile(new URL(policyMigration, dir), 'utf8'));
+  assert.equal((await database.query('SELECT gmail_draft_allowed FROM prospect_research_requests WHERE id = $1',
+    [migratedRequestId])).rows[0].gmail_draft_allowed, false);
+  await database.query('DELETE FROM prospects WHERE id = $1', [migratedProspectId]);
 
   const root = 'https://business.testsite.org/';
   const contact = 'https://business.testsite.org/contact';
@@ -97,8 +113,9 @@ test('Prospect research journals external artifacts and creates only review draf
 
   await t.test('success is one review-only draft and duplicate starts reach no providers', async () => {
     const id = await insertProspect();
-    const request = await startProspectResearch(id, deps);
+    const request = await startProspectResearch(id, deps, { gmailDraftAllowed: true });
     assert.equal(request.status, 'completed');
+    assert.equal(request.gmail_draft_allowed, true);
     const draft = (await database.query('SELECT * FROM message_drafts WHERE prospect_id = $1', [id])).rows[0];
     assert.equal(draft.id, request.id);
     assert.equal(draft.research_request_id, request.id);
@@ -107,7 +124,7 @@ test('Prospect research journals external artifacts and creates only review draf
     assert.equal((await database.query('SELECT count(*) FROM outreach_jobs WHERE draft_id = $1', [request.id])).rows[0].count, '0');
     assert.equal((await database.query('SELECT stage,contact_email FROM prospects WHERE id = $1', [id])).rows[0].stage, 'draft_ready');
     const before = { ...calls };
-    await assert.rejects(startProspectResearch(id, deps));
+    await assert.rejects(startProspectResearch(id, deps, { gmailDraftAllowed: true }));
     assert.deepEqual(calls, before);
   });
 
@@ -115,7 +132,7 @@ test('Prospect research journals external artifacts and creates only review draf
     const id = await insertProspect();
     output = fixtureResult('');
     const before = calls.gmail;
-    const request = await startProspectResearch(id, deps);
+    const request = await startProspectResearch(id, deps, { gmailDraftAllowed: true });
     assert.equal(request.status, 'needs_contact');
     assert.ok(request.brief_id);
     assert.equal(calls.gmail, before);
@@ -126,7 +143,10 @@ test('Prospect research journals external artifacts and creates only review draf
     const id = await insertProspect();
     output = fixtureResult('hello@business.testsite.org');
     const before = { ...calls };
-    const settled = await Promise.allSettled([startProspectResearch(id, deps), startProspectResearch(id, deps)]);
+    const settled = await Promise.allSettled([
+      startProspectResearch(id, deps, { gmailDraftAllowed: true }),
+      startProspectResearch(id, deps, { gmailDraftAllowed: true }),
+    ]);
     assert.equal(settled.filter(item => item.status === 'fulfilled').length, 1);
     assert.equal(calls.research, before.research + 1);
     assert.equal(calls.folder, before.folder + 1);
@@ -138,7 +158,7 @@ test('Prospect research journals external artifacts and creates only review draf
     const id = await insertProspect();
     failDriveRead = true;
     const before = { ...calls };
-    await assert.rejects(startProspectResearch(id, deps), /could not be verified/);
+    await assert.rejects(startProspectResearch(id, deps, { gmailDraftAllowed: true }), /could not be verified/);
     const request = (await database.query('SELECT * FROM prospect_research_requests WHERE prospect_id = $1', [id])).rows[0];
     assert.equal(request.status, 'needs_reconciliation');
     assert.ok(request.folder_id);
@@ -152,7 +172,7 @@ test('Prospect research journals external artifacts and creates only review draf
     const id = await insertProspect();
     output = fixtureResult('', 'C');
     const before = calls.gmail;
-    const request = await startProspectResearch(id, deps);
+    const request = await startProspectResearch(id, deps, { gmailDraftAllowed: true });
     assert.equal(request.status, 'research_review');
     assert.equal(calls.gmail, before);
     const brief = briefs.get(request.id);
@@ -162,12 +182,13 @@ test('Prospect research journals external artifacts and creates only review draf
     assert.doesNotMatch(brief, /PROPOSED OUTREACH FOR HUMAN REVIEW|Question about inquiries/);
   });
 
-  await t.test('research-only mode saves the brief but never creates a Gmail draft for a public contact', async () => {
+  await t.test('safe start persists Gmail disallowed and reaches research review without a draft', async () => {
     const id = await insertProspect();
     output = fixtureResult('hello@business.testsite.org', 'A');
     const before = calls.gmail;
-    const request = await startProspectResearch(id, { ...deps, draftMode: 'research_only' });
+    const request = await startProspectResearch(id, deps, { gmailDraftAllowed: false });
     assert.equal(request.status, 'research_review');
+    assert.equal(request.gmail_draft_allowed, false);
     assert.ok(request.folder_id);
     assert.ok(request.brief_id);
     assert.equal(request.gmail_draft_id, null);
@@ -180,7 +201,7 @@ test('Prospect research journals external artifacts and creates only review draf
     const id = await insertProspect();
     output = { ...fixtureResult(''), outreachSubject: '' };
     const before = { ...calls };
-    await assert.rejects(startProspectResearch(id, deps), /failed validation or collection/);
+    await assert.rejects(startProspectResearch(id, deps, { gmailDraftAllowed: true }), /failed validation or collection/);
     const saved = (await database.query('SELECT * FROM prospect_research_requests WHERE prospect_id = $1', [id])).rows[0];
     assert.equal(saved.status, 'failed');
     assert.equal(saved.last_error, 'Research result validation failed: outreach_copy.');
@@ -250,18 +271,18 @@ test('Prospect research journals external artifacts and creates only review draf
     const id = await insertProspect();
     output = fixtureResult('hello@business.testsite.org');
     failGmail = true;
-    await assert.rejects(startProspectResearch(id, deps), /requires reconciliation/);
+    await assert.rejects(startProspectResearch(id, deps, { gmailDraftAllowed: true }), /requires reconciliation/);
     const saved = (await database.query('SELECT * FROM prospect_research_requests WHERE prospect_id = $1', [id])).rows[0];
     assert.equal(saved.status, 'needs_reconciliation');
     assert.equal((await database.query('SELECT count(*) FROM message_drafts WHERE prospect_id = $1', [id])).rows[0].count, '0');
     const before = { ...calls };
-    await assert.rejects(startProspectResearch(id, deps));
+    await assert.rejects(startProspectResearch(id, deps, { gmailDraftAllowed: true }));
     await assert.rejects(resumeProspectResearch(saved.id, deps));
     assert.deepEqual(calls, before);
     failGmail = false;
   });
 
-  await t.test('safe brief checkpoint resumes without repeating research or Drive creation', async () => {
+  await t.test('Gmail-enabled brief checkpoint resumes without repeating research or Drive creation', async () => {
     const id = await insertProspect();
     const requestId = randomUUID(), oldOwner = randomUUID();
     const brief: DriveArtifact = { id: randomUUID().replaceAll('-', ''), mimeType: 'application/vnd.google-apps.folder',
@@ -272,8 +293,9 @@ test('Prospect research journals external artifacts and creates only review draf
     artifacts.set(doc.id, doc);
     await database.query("UPDATE prospects SET stage = 'research_in_progress' WHERE id = $1", [id]);
     await database.query(`INSERT INTO prospect_research_requests
-      (id,prospect_id,status,owner_token,input_snapshot,drive_parent_id,evidence,result,folder_id,brief_id)
-      VALUES ($1,$2,'brief_ready',$3,$4,$5,$6,$7,$8,$9)`,
+      (id,prospect_id,status,owner_token,input_snapshot,drive_parent_id,evidence,result,folder_id,brief_id,
+       gmail_draft_allowed)
+      VALUES ($1,$2,'brief_ready',$3,$4,$5,$6,$7,$8,$9,true)`,
     [requestId,id,oldOwner,JSON.stringify({ company_name: 'Research Fixture', website: root, industry: null,
       contact_email: null, contact_name: null, primary_discovery_question: null }),parent,
       JSON.stringify(evidence),JSON.stringify(fixtureResult('hello@business.testsite.org')),brief.id,doc.id]);
@@ -284,5 +306,54 @@ test('Prospect research journals external artifacts and creates only review draf
     assert.equal(calls.brief, before.brief);
     assert.equal(calls.research, before.research);
     assert.equal(calls.gmail, before.gmail + 1);
+  });
+
+  await t.test('default-disallowed brief checkpoint blocks Gmail after dependency reconstruction', async () => {
+    const id = await insertProspect();
+    const requestId = randomUUID(), oldOwner = randomUUID();
+    const folder: DriveArtifact = { id: randomUUID().replaceAll('-', ''), mimeType: 'application/vnd.google-apps.folder',
+      parents: [parent], appProperties: { relayResearchRequestId: requestId, relayArtifactKind: 'folder' } };
+    const brief: DriveArtifact = { id: randomUUID().replaceAll('-', ''), mimeType: 'application/vnd.google-apps.document',
+      parents: [folder.id], appProperties: { relayResearchRequestId: requestId, relayArtifactKind: 'brief' } };
+    artifacts.set(folder.id, folder);
+    artifacts.set(brief.id, brief);
+    await database.query("UPDATE prospects SET stage = 'research_in_progress' WHERE id = $1", [id]);
+    await database.query(`INSERT INTO prospect_research_requests
+      (id,prospect_id,status,owner_token,input_snapshot,drive_parent_id,evidence,result,folder_id,brief_id)
+      VALUES ($1,$2,'brief_ready',$3,$4,$5,$6,$7,$8,$9)`,
+    [requestId,id,oldOwner,JSON.stringify({ company_name: 'Research Fixture', website: root, industry: null,
+      contact_email: null, contact_name: null, primary_discovery_question: null }),parent,
+      JSON.stringify(evidence),JSON.stringify(fixtureResult('hello@business.testsite.org')),folder.id,brief.id]);
+    const before = { ...calls };
+    const request = await resumeProspectResearch(requestId, { ...deps });
+    assert.equal(request.status, 'research_review');
+    assert.equal(request.gmail_draft_allowed, false);
+    assert.equal(request.gmail_draft_id, null);
+    assert.equal(calls.folder, before.folder);
+    assert.equal(calls.brief, before.brief);
+    assert.equal(calls.research, before.research);
+    assert.equal(calls.gmail, before.gmail);
+    assert.equal((await database.query('SELECT count(*) FROM message_drafts WHERE prospect_id = $1', [id])).rows[0].count, '0');
+    assert.equal((await database.query('SELECT stage FROM prospects WHERE id = $1', [id])).rows[0].stage, 'research_review');
+  });
+
+  await t.test('safe failed research keeps Gmail disallowed when retried with normal dependencies', async () => {
+    const id = await insertProspect();
+    output = { ...fixtureResult(''), outreachSubject: '' };
+    await assert.rejects(startProspectResearch(id, deps, { gmailDraftAllowed: false }),
+      /failed validation or collection/);
+    const saved = (await database.query('SELECT * FROM prospect_research_requests WHERE prospect_id = $1', [id])).rows[0];
+    assert.equal(saved.gmail_draft_allowed, false);
+    output = fixtureResult('hello@business.testsite.org');
+    const before = { ...calls };
+    const retried = await retryFailedPreArtifactResearch(saved.id, { ...deps });
+    assert.equal(retried.status, 'research_review');
+    assert.equal(retried.gmail_draft_allowed, false);
+    assert.equal(retried.gmail_draft_id, null);
+    assert.equal(calls.research, before.research + 1);
+    assert.equal(calls.folder, before.folder + 1);
+    assert.equal(calls.brief, before.brief + 1);
+    assert.equal(calls.gmail, before.gmail);
+    assert.equal((await database.query('SELECT count(*) FROM message_drafts WHERE prospect_id = $1', [id])).rows[0].count, '0');
   });
 });

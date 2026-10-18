@@ -24,10 +24,9 @@ async function main() {
       : (await import('../src/gmail/gmail-runtime.js')).createProductionGmailDraftCreator();
     const deps = { database: db, scrape: createFirecrawlScraper(), research: createOpenAIResearcher(),
       drive: createResearchDrive(), createGmailDraft,
-      driveParentId: process.env.RELAY_RESEARCH_DRIVE_PARENT_ID ?? '',
-      ...(safeResearch ? { draftMode: 'research_only' as const } : {}) };
+      driveParentId: process.env.RELAY_RESEARCH_DRIVE_PARENT_ID ?? '' };
     const request = command.action === 'start' || command.action === 'start-safe'
-      ? await startProspectResearch(command.prospectId, deps)
+      ? await startProspectResearch(command.prospectId, deps, { gmailDraftAllowed: !safeResearch })
       : command.action === 'retry-pre-artifact'
         ? await retryFailedPreArtifactResearch(command.requestId, deps)
         : await resumeProspectResearch(command.requestId, deps);
