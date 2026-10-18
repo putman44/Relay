@@ -55,7 +55,7 @@ If the configuration cannot be confirmed, do not run the test; report it as skip
 ## Implement safely
 
 - Prefer the smallest correct change that satisfies the approved scope.
-- Use test-driven development where practical, especially at pre-agreed seams.
+- Use test-driven development where practical, especially for state-machine transitions, durable request identity and duplicate handling, and fail-closed or reconciliation paths around provider side effects.
 - Preserve fail-closed behavior.
 - Preserve existing idempotency, transaction, locking, deduplication, and reconciliation guarantees.
 - Never weaken authorization, approval gates, feature flags, state-transition checks, audit evidence, or other protections around external side effects.

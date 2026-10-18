@@ -53,7 +53,7 @@ Treat every pre-existing uncommitted change, whether staged, unstaged, or untrac
 
 - Do not perform live Gmail, Google Drive, Firecrawl, or OpenAI operations, run workers or schedulers, or run operator mutations without explicit authorization for that specific action.
 - Do not set or enable live-send flags, such as `RELAY_ENABLE_LIVE_OUTREACH_SEND`, in a shell, `.env`, process environment, or deployment configuration without explicit authorization for that specific action. Verification never requires them.
-- Do not run migrations or other state-changing operational commands merely for verification. Apart from `typecheck` and `test`, the `npm run` scripts (`draft:outreach`, `worker:outreach`, `monitor:outreach`, `monitor:replies`, `reply:process`, `follow-up`, `research`, `outreach:operator`) and the operational entry points under `scripts/`, including `run-migration.ts`, operate against the configured database or live providers. Approved database-writing tests that apply migrations inside their own disposable `relay_test` schema are not operational commands.
+- Do not run migrations or other state-changing operational commands merely for verification. Every `npm run` script other than `typecheck` and `test`, and every operational entry point under `scripts/`, operates against the configured database or live providers. Examples include `prospect:add`, `draft:outreach`, `worker:outreach`, `monitor:outreach`, `monitor:replies`, `reply:process`, `follow-up`, `research`, `outreach:operator`, and `scripts/run-migration.ts`; these examples are not exhaustive. Approved database-writing tests that apply migrations inside their own disposable `relay_test` schema are not operational commands.
 
 ## Git and GitHub
 
