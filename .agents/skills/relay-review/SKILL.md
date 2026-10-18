@@ -1,6 +1,7 @@
 ---
 name: relay-review
 description: "Perform a read-only review of Relay changes since a user-supplied fixed point across Spec, Relay Safety, and Standards. Use only when explicitly invoked; never fix findings or modify repository or remote state."
+disable-model-invocation: true
 ---
 
 # Relay review

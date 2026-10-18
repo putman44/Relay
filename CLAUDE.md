@@ -1,12 +1,9 @@
 # Claude Code Instructions
 
-Read `AGENTS.md` before performing Relay work. `AGENTS.md` is the authoritative repository-wide engineering handbook.
+@AGENTS.md
 
-Use the project skills under `.claude/skills/` for Relay workflows:
+`AGENTS.md`, imported above, is the authoritative shared engineering handbook for Relay. This file adds only Claude Code compatibility notes.
 
-- `relay-implement` for approved implementation work.
-- `relay-review` for independent read-only review work.
-
-Preserve Relay's existing safety properties, including fail-closed behavior, idempotency, transactions, locking, reconciliation, approval boundaries, and external-effect protections.
-
-Do not weaken production, database, provider, or human-approval safeguards.
+- Relay skills are available under `.claude/skills/`, which contains relative symlinks to the canonical copies in `.agents/skills/`. Edit skills in `.agents/skills/` only.
+- Both Relay skills set `disable-model-invocation: true`. Invoke them explicitly as `/relay-implement` or `/relay-review`.
+- Keep personal or machine-specific Claude Code settings in git-ignored local files such as `.claude/settings.local.json` or `CLAUDE.local.md`, not in this file.

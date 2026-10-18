@@ -1,51 +1,24 @@
-# Domain Docs
+# Relay domain documentation
 
-How the engineering skills should consume this repo's domain documentation when exploring the codebase.
+Relay keeps its domain and operational knowledge in the documents below. Read the relevant portions before changing or reviewing code in the area they cover, and prefer them, together with the current code, over remembered behavior or generic practice.
 
-## Before exploring, read these
+Relay has no glossary or ADR directory. Its terminology and decisions are recorded in these documents.
 
-- **`GLOSSARY.md`** at the repo root, or
-- **`GLOSSARY-MAP.md`** at the repo root if it exists: it points at one `GLOSSARY.md` per context. Read each one relevant to the topic.
-- **`docs/adr/`**: read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
+## Read before working
 
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
+- **`docs/Relay_Migration_Plan.md`**: the n8n migration slices (outreach drafting through approved sending, reply monitoring, reply classification and response drafts, follow-ups, prospect research, client onboarding), their status and acceptance boundaries, required migrations, and per-slice verification notes. Read the slice that matches your change.
+- **`docs/Relay_Testing_and_Worker_Guide.md`**: key terms (prospect, message draft, outreach job, worker), the outreach job state machine and legal transitions, claiming, retry behavior and the Gmail side-effect boundary, terminal failure and guarded manual requeue, stale job detection, the test catalog, the testing procedure, and the current safety rules (section 15).
+- **`docs/Relay_Production_Operations_Runbook.md`**: non-negotiable production safety rules, the read-only health check, inspection and recovery, the scheduler contract, deployment, and disable and rollback. Read it before touching monitoring, scheduling, deployment, recovery, or operator commands.
+- **`docs/N8N_Export_Inventory_2026-10-16.md`**: the inventory of the n8n workflow exports Relay is replacing, their differences from earlier archives, and open findings that need a decision or validation.
 
-## File structure
+Also read the relevant code, tests, migrations under `migrations/`, and deployment files under `deploy/`.
 
-Single-context repo (most repos):
+## Use Relay's vocabulary
 
-```
-/
-├── GLOSSARY.md
-├── docs/adr/
-│   ├── 0001-event-sourced-orders.md
-│   └── 0002-postgres-for-write-model.md
-└── src/
-```
+Use the terms these documents and the code already use, such as prospect, message draft, outreach job, worker, claim, reconciliation, and guarded manual requeue. Do not introduce synonyms for established concepts.
 
-Multi-context repo (presence of `GLOSSARY-MAP.md` at the root):
+## Surface conflicts
 
-```
-/
-├── GLOSSARY-MAP.md
-├── docs/adr/                          ← system-wide decisions
-└── src/
-    ├── ordering/
-    │   ├── GLOSSARY.md
-    │   └── docs/adr/                  ← context-specific decisions
-    └── billing/
-        ├── GLOSSARY.md
-        └── docs/adr/
-```
+If a change or finding contradicts a documented safety rule, state-machine transition, acceptance boundary, or recorded decision, say so explicitly and cite the document and section. Do not silently override it.
 
-## Use the glossary's vocabulary
-
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `GLOSSARY.md`. Don't drift to synonyms the glossary explicitly avoids.
-
-If the concept you need isn't in the glossary yet, that's a signal: either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
-
-## Flag ADR conflicts
-
-If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
-
-> _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
+These documents describe the state at the time they were written. When a document and the current code disagree, report the discrepancy rather than assuming either one is correct.
