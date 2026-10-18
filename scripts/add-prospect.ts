@@ -1,11 +1,11 @@
 import 'dotenv/config';
 import { readFile } from 'node:fs/promises';
-import { parseProspectIntakeArgs } from '../src/operator/prospect-intake-input.js';
+import { parseProspectIntakeArgs, parseProspectIntakeJson } from '../src/operator/prospect-intake-input.js';
 import { parseProspectIntakePayload } from '../src/intake/prospect-intake.js';
 
 async function main(): Promise<void> {
   const command = parseProspectIntakeArgs(process.argv.slice(2));
-  const raw = JSON.parse(await readFile(command.inputPath, 'utf8')) as unknown;
+  const raw = parseProspectIntakeJson(await readFile(command.inputPath, 'utf8'));
   const input = parseProspectIntakePayload(raw);
   const { db } = await import('../src/db.js');
   try {

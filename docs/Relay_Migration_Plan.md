@@ -162,11 +162,15 @@ full regression tests passed for the code at that checkpoint, including the
 then-current step 5 research tests. That checkpoint predates the later durable
 prospect-intake and stored Gmail-draft-policy changes and does not validate
 them. Those later changes have focused test coverage, described in
-[Relay Testing & Worker Guide](Relay_Testing_and_Worker_Guide.md), but no later
-full-suite result is recorded for them; 272/272 remains the most recent
-documented full-suite result. The October 17 run used fake Firecrawl, OpenAI, Drive, and Gmail providers plus
-disposable localhost Postgres; it made no live provider request, production
-migration, send, or worker invocation.
+[Relay Testing & Worker Guide](Relay_Testing_and_Worker_Guide.md). The October
+17 run used fake Firecrawl, OpenAI, Drive, and Gmail providers plus disposable
+localhost Postgres; it made no live provider request, production migration,
+send, or worker invocation.
+
+Later regression verification on October 18, 2026, separate from the October 17
+checkpoint: a guarded full-suite run against the local disposable `relay_test`
+database passed 285/285 tests, with 0 failed and 0 skipped. No live Firecrawl,
+OpenAI, Drive, or Gmail operations were performed.
 
 ## First slice: supplied outreach copy to a reviewable Gmail draft
 

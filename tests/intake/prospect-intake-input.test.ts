@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { parseProspectIntakeArgs } from '../../src/operator/prospect-intake-input.js';
+import { parseProspectIntakeArgs, parseProspectIntakeJson } from '../../src/operator/prospect-intake-input.js';
 import { parseProspectIntakePayload } from '../../src/intake/prospect-intake.js';
 
 test('Prospect intake input: accepts a strict normalized prospect payload', () => {
@@ -39,4 +39,18 @@ test('Prospect intake CLI: requires an input path and explicit confirmation', ()
     { inputPath: '/tmp/prospect.json' });
   assert.throws(() => parseProspectIntakeArgs(['--input', '/tmp/prospect.json']));
   assert.throws(() => parseProspectIntakeArgs(['--input', '/tmp/prospect.json', '--confirm-create-prospect', '--extra']));
+});
+
+test('Prospect intake CLI: JSON parse errors do not echo intake content', () => {
+  const privateText = 'private-contact@example.com confidential notes';
+  for (const text of [privateText, `{"contactEmail": "${privateText}" x}`, '']) {
+    assert.throws(() => parseProspectIntakeJson(text), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message, 'Prospect intake input is not valid JSON.');
+      assert.ok(!error.message.includes('private-contact'));
+      assert.equal(error.cause, undefined);
+      return true;
+    });
+  }
+  assert.deepEqual(parseProspectIntakeJson('{"companyName":"A"}'), { companyName: 'A' });
 });

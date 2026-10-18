@@ -7,3 +7,12 @@ export function parseProspectIntakeArgs(args: string[]): ProspectIntakeCommand {
   }
   throw new Error('Use --input /absolute/path/to/prospect.json --confirm-create-prospect.');
 }
+
+// JSON.parse messages can quote input text, so parse failures use a fixed message.
+export function parseProspectIntakeJson(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Error('Prospect intake input is not valid JSON.');
+  }
+}

@@ -7,6 +7,8 @@ import { renderResearchBrief, ResearchValidationError, validateResearchResult,
 import { createFirecrawlScraper } from '../../src/research/firecrawl-scraper.js';
 import { createOpenAIResearcher } from '../../src/research/openai-researcher.js';
 import { parseResearchArgs } from '../../src/operator/research-input.js';
+import { researchMutationOutput, researchStatusOutput } from '../../src/operator/research-output.js';
+import type { ResearchRequest } from '../../src/research/prospect-research.js';
 
 const root = 'https://business.example.com/';
 const contact = 'https://business.example.com/contact';
@@ -212,4 +214,18 @@ test('Research CLI requires explicit confirmation before provider access', () =>
   assert.deepEqual(parseResearchArgs(['retry-pre-artifact', '--request', id, '--confirm-retry-pre-artifact']),
     { action: 'retry-pre-artifact', requestId: id });
   assert.throws(() => parseResearchArgs(['retry-pre-artifact', '--request', id]));
+});
+
+test('Research CLI output shows the stored Gmail-draft policy', () => {
+  const stored = { id: randomUUID(), prospect_id: randomUUID(), status: 'completed', folder_id: 'folder',
+    brief_id: 'brief', brief_url: 'https://docs.google.com/document/d/brief', gmail_draft_id: null,
+    gmail_draft_allowed: false, last_error: null } as ResearchRequest;
+  assert.deepEqual(researchStatusOutput(stored), { id: stored.id, prospectId: stored.prospect_id, status: 'completed',
+    folderId: 'folder', briefId: 'brief', briefUrl: stored.brief_url, gmailDraftId: null,
+    gmailDraftAllowed: false, lastError: null });
+  assert.equal(researchStatusOutput(null), null);
+  assert.equal(researchStatusOutput({ ...stored, gmail_draft_allowed: true })?.gmailDraftAllowed, true);
+  assert.deepEqual(researchMutationOutput(stored), { id: stored.id, prospectId: stored.prospect_id, status: 'completed',
+    folderId: 'folder', briefId: 'brief', briefUrl: stored.brief_url, gmailDraftId: null, gmailDraftAllowed: false });
+  assert.equal(researchMutationOutput({ ...stored, gmail_draft_allowed: true }).gmailDraftAllowed, true);
 });
