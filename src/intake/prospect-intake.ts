@@ -102,11 +102,11 @@ async function transaction<T>(pool: Pool, run: (client: PoolClient) => Promise<T
   }
 }
 
-async function existingResult(client: PoolClient, row: IntakeRow, requestId: string): Promise<ProspectIntakeResult> {
+async function existingResult(client: PoolClient, row: IntakeRow): Promise<ProspectIntakeResult> {
   const prospect = (await client.query<ProspectRow>('SELECT id, stage, website FROM prospects WHERE id = $1',
     [row.prospect_id])).rows[0];
   if (!prospect) throw new Error('Prospect intake journal points to a missing prospect; inspect before recovery.');
-  return { requestId, prospectId: prospect.id, stage: prospect.stage, created: false };
+  return { requestId: row.id, prospectId: prospect.id, stage: prospect.stage, created: false };
 }
 
 export async function createProspectFromIntake(input: ProspectIntakeInput, database: Pool): Promise<ProspectIntakeResult> {
@@ -125,7 +125,7 @@ export async function createProspectFromIntake(input: ProspectIntakeInput, datab
       if (byRequest.identity_key !== identityKey || !sameSnapshot(byRequest.input_snapshot, inputSnapshot)) {
         throw new Error('Prospect intake request ID already exists with different input; inspect before continuing.');
       }
-      return existingResult(client, byRequest, normalized.requestId);
+      return existingResult(client, byRequest);
     }
 
     const byIdentity = (await client.query<IntakeRow>(
@@ -135,7 +135,7 @@ export async function createProspectFromIntake(input: ProspectIntakeInput, datab
       if (!sameSnapshot(byIdentity.input_snapshot, inputSnapshot)) {
         throw new Error('A prospect intake already exists for this website with different input; inspect before updating it.');
       }
-      return existingResult(client, byIdentity, normalized.requestId);
+      return existingResult(client, byIdentity);
     }
 
     const legacy = await client.query<{ id: string; website: string | null }>(

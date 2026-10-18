@@ -53,20 +53,46 @@ test('Prospect intake: durable creation, idempotency and duplicate protection', 
     await database.query("UPDATE prospects SET stage = 'research_review' WHERE id = $1", [first.prospectId]);
     const second = await createProspectFromIntake(input, database);
     assert.equal(second.created, false);
+    assert.equal(second.requestId, input.requestId);
     assert.equal(second.prospectId, first.prospectId);
     assert.equal(second.stage, 'research_review');
     assert.equal((await database.query('SELECT count(*) FROM prospects WHERE website = $1', [input.website])).rows[0].count, '1');
   });
 
-  await t.test('concurrent identical submissions create one prospect', async () => {
-    const input = { ...base(), website: 'https://concurrent-intake.com/' };
+  await t.test('a new request ID for identical intake returns the authoritative durable request ID', async () => {
+    const input = { ...base(), website: 'https://durable-request-id-intake.com/' };
+    const duplicateRequestId = randomUUID();
+    const first = await createProspectFromIntake(input, database);
+    const duplicate = await createProspectFromIntake({ ...input, requestId: duplicateRequestId }, database);
+    const repeated = await createProspectFromIntake({ ...input, requestId: duplicateRequestId }, database);
+
+    assert.equal(duplicate.created, false);
+    assert.equal(duplicate.requestId, first.requestId);
+    assert.equal(duplicate.prospectId, first.prospectId);
+    assert.deepEqual(repeated, duplicate);
+    assert.equal((await database.query('SELECT count(*) FROM prospect_intake_requests WHERE id = $1',
+      [duplicateRequestId])).rows[0].count, '0');
+    assert.equal((await database.query('SELECT count(*) FROM prospects WHERE website = $1',
+      [input.website])).rows[0].count, '1');
+    assert.equal((await database.query('SELECT count(*) FROM prospect_intake_requests WHERE identity_key = $1',
+      [new URL(input.website).origin.toLowerCase()])).rows[0].count, '1');
+  });
+
+  await t.test('concurrent identical submissions with different request IDs converge on one durable result', async () => {
+    const firstInput = { ...base(), website: 'https://concurrent-intake.com/' };
+    const secondInput = { ...firstInput, requestId: randomUUID() };
     const results = await Promise.all([
-      createProspectFromIntake(input, database),
-      createProspectFromIntake(input, database),
+      createProspectFromIntake(firstInput, database),
+      createProspectFromIntake(secondInput, database),
     ]);
     assert.equal(results.filter(result => result.created).length, 1);
+    assert.equal(results[0]!.requestId, results[1]!.requestId);
     assert.equal(results[0]!.prospectId, results[1]!.prospectId);
-    assert.equal((await database.query('SELECT count(*) FROM prospects WHERE website = $1', [input.website])).rows[0].count, '1');
+    assert.ok([firstInput.requestId, secondInput.requestId].includes(results[0]!.requestId));
+    assert.equal((await database.query('SELECT count(*) FROM prospects WHERE website = $1',
+      [firstInput.website])).rows[0].count, '1');
+    assert.equal((await database.query('SELECT count(*) FROM prospect_intake_requests WHERE identity_key = $1',
+      [new URL(firstInput.website).origin.toLowerCase()])).rows[0].count, '1');
   });
 
   await t.test('same request with changed input and same website with changed input both fail closed', async () => {
