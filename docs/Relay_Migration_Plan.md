@@ -72,14 +72,18 @@ Gmail draft or `message_drafts` row.
 `start` requires a researching prospect with a supplied HTTPS business website,
 an explicit Drive parent folder ID, and a confirmation flag. It reserves the
 prospect before any provider call. Relay scrapes the supplied website and up to
-four safe same-origin page links discovered on its first page. Contact and
-inquiry paths rank first, then business/service paths; other safe page links
+four safe same-site page links discovered on its first page. Research treats an
+apex host and its `www` host as the same site when the HTTPS scheme matches.
+Contact and inquiry paths rank first, then business/service paths; other safe page links
 fill remaining slots in their discovered order. Asset links are excluded.
 The saved evidence reports skipped out-of-scope links, assets, and pages beyond
 the four-page follow-up limit separately from pages that were selected but
 failed verification. It does not run the old n8n general web search or map phase. Firecrawl
-scrape responses must report the exact requested source URL and successful HTTP
-status. The model receives only those saved pages, has no tools, and must return
+scrape responses must report a source URL equivalent to the requested URL and a
+successful HTTP status. Equivalent means the same HTTPS scheme and path, with
+apex/`www` hosts and a trailing slash treated as the same. A reported final URL
+may be absent; when present, it must be a string that passes the same check.
+Saved pages keep the requested URL. The model receives only those saved pages, has no tools, and must return
 the exact research schema. Relay validates sources against fetched pages and
 requires a recommended email to appear on its cited page. This is structural
 evidence checking; a person must still assess whether claims and copy are true.
@@ -167,10 +171,14 @@ them. Those later changes have focused test coverage, described in
 localhost Postgres; it made no live provider request, production migration,
 send, or worker invocation.
 
-Later regression verification on October 18, 2026, separate from the October 17
-checkpoint: a guarded full-suite run against the local disposable `relay_test`
-database passed 285/285 tests, with 0 failed and 0 skipped. No live Firecrawl,
-OpenAI, Drive, or Gmail operations were performed.
+Historical regression verification on October 18, 2026, separate from the
+October 17 checkpoint: a guarded full-suite run against the local disposable
+`relay_test` database passed 285/285 tests, with 0 failed and 0 skipped, for the
+branch state at that time. No live Firecrawl, OpenAI, Drive, or Gmail operations
+were performed. That run predates the later research status output,
+prospect-intake JSON parse-error, and Firecrawl metadata validation changes, so
+it does not verify the current branch. No full-suite result is recorded yet for those
+changes.
 
 ## First slice: supplied outreach copy to a reviewable Gmail draft
 

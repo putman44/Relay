@@ -2,7 +2,7 @@
 
 **Project:** Relay
 **Recorded test checkpoint:** 272/272 full regression tests passed on disposable local Postgres (October 17, 2026), including the step 5 research tests. Typecheck passed at that checkpoint. No live Firecrawl, OpenAI, Drive, or Gmail operations were performed. This historical checkpoint predates the later intake and durable Gmail-policy changes.
-**Later regression verification (October 18, 2026):** a guarded full-suite run against the local disposable relay_test database passed 285/285 tests, with 0 failed and 0 skipped. This verification is separate from the October 17 historical checkpoint. No live Firecrawl, OpenAI, Drive, or Gmail operations were performed.
+**Historical regression verification (October 18, 2026):** a guarded full-suite run against the local disposable relay_test database passed 285/285 tests, with 0 failed and 0 skipped, for the branch state at that time. This verification is separate from the October 17 historical checkpoint. No live Firecrawl, OpenAI, Drive, or Gmail operations were performed. It predates the later research status output, prospect-intake JSON parse-error, and Firecrawl metadata validation changes and does not verify the current branch. No full-suite result is recorded yet for those changes.
 **Purpose:** Explain what the tests protect, how the queue/worker system fits together, and what to do when adding new behavior.
 
 ---
@@ -1071,7 +1071,7 @@ identity with different input, fails closed.
 
 | Test | What it protects |
 | --- | --- |
-| `tests/intake/prospect-intake-input.test.ts` | Strict normalized input, explicit CLI confirmation, and rejection of unsafe URLs, invalid email, and unknown fields |
+| `tests/intake/prospect-intake-input.test.ts` | Strict normalized input, explicit CLI confirmation, rejection of unsafe URLs, invalid email, and unknown fields, and JSON parse errors that do not echo intake input |
 | `tests/intake/prospect-intake.test.ts` | Migration 012, atomic prospect/journal creation, authoritative duplicate request ID, concurrent convergence, and request-ID/identity conflict rejection |
 
 The database-backed intake test uses fake/local inputs and a unique schema on
@@ -1099,7 +1099,7 @@ uncertain outcomes require reconciliation instead of automatic recreation. See
 
 | Test | What it protects |
 | --- | --- |
-| `tests/research/research-contract.test.ts` | Safe same-origin link selection, exact source and public-email evidence, strict object/string validation, tool-free provider requests, and distinct explicit confirmation for `start` and `start-safe` |
+| `tests/research/research-contract.test.ts` | Safe same-site link selection with apex/`www` treated as one site under the same HTTPS scheme, equivalent Firecrawl source and final URLs (apex/`www` and trailing slash) with rejection of non-string or mismatched final URLs, exact saved-page citations and public-email evidence, strict object/string validation, tool-free provider requests, distinct explicit confirmation for `start` and `start-safe`, and research status output that shows the stored Gmail-draft policy |
 | `tests/research/prospect-research.test.ts` | Migrations 011 and 013, conservative default for existing rows, normal/safe stored policy, review-only success, safe `research_review` without Gmail, missing-contact and C-fit holds, concurrent reservation, retained Drive IDs after failure, uncertain Gmail creation, duplicate blocking, and stored-policy preservation across resume/retry |
 
 The integration test uses both guarded database URLs with a disposable local

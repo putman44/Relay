@@ -177,6 +177,14 @@ test('Firecrawl adapter accepts only a successful matching source', async () => 
       metadata: { sourceURL: 'https://www.business.example.com/', url: 'https://www.business.example.com/', statusCode: 200 } } }) }));
   assert.equal((await canonical(root)).url, root);
 
+  const withFinalUrl = (url: unknown) => createFirecrawlScraper('fake-key', async () => ({ ok: true,
+    text: async () => JSON.stringify({ success: true, data: { markdown: 'Business', links: [],
+      metadata: { sourceURL: root, url, statusCode: 200 } } }) }));
+  assert.equal((await withFinalUrl(null)(root)).url, root);
+  for (const finalUrl of [[root], 200, { href: root }, true, '', 'https://evil.test/']) {
+    await assert.rejects(withFinalUrl(finalUrl)(root), /provenance or content is invalid/);
+  }
+
   await assert.rejects(createFirecrawlScraper('fake-key', async () => ({ ok: true,
     text: async () => JSON.stringify({ success: true, data: { markdown: 'Wrong', links: [],
       metadata: { sourceURL: 'https://evil.test/', statusCode: 200 } } }) }))(root));
