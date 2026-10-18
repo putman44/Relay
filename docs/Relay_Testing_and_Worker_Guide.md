@@ -1,7 +1,8 @@
 # Relay Testing & Worker Guide
 
 **Project:** Relay
-**Current test checkpoint:** 263/263 full regression tests passed on disposable local Postgres (October 16, 2026), including the step 5 research tests. Typecheck and whitespace checks passed. No live Firecrawl, OpenAI, Drive, or Gmail operations were performed.
+**Recorded test checkpoint:** 272/272 full regression tests passed on disposable local Postgres (October 17, 2026), including the step 5 research tests. Typecheck passed at that checkpoint. No live Firecrawl, OpenAI, Drive, or Gmail operations were performed. This historical checkpoint predates the later intake and durable Gmail-policy changes.
+**Later regression verification (October 18, 2026):** a guarded full-suite run against the local disposable relay_test database passed 285/285 tests, with 0 failed and 0 skipped. This verification is separate from the October 17 historical checkpoint. No live Firecrawl, OpenAI, Drive, or Gmail operations were performed.
 **Purpose:** Explain what the tests protect, how the queue/worker system fits together, and what to do when adding new behavior.
 
 ---
@@ -713,6 +714,16 @@ flowchart LR
 npx tsx --test tests/<domain>/<specific-test>.test.ts
 ```
 
+If the focused test touches Postgres, the operator must apply the same database
+safety configuration as the full suite: both `DATABASE_URL` and
+`RELAY_DRAFT_TEST_DATABASE_URL` must target the guarded local disposable
+`relay_test` database, and `RELAY_TEST_DATABASE_DISPOSABLE` must be exactly
+`true`. The intake and research focused database suites enforce this guard
+in-process. Older focused database suites do not universally execute an
+in-process guard, so their safe configuration remains a mandatory operator
+responsibility. Never use an application, production, or remote database for a
+focused test.
+
 ### Full suite
 
 ```bash
@@ -1015,15 +1026,22 @@ pending. Existing outreach commands do not accept response drafts.
 | `tests/outreach/process-reply.test.ts` | Disposable-schema journal migrations, concurrency/duplicates, opt-outs/OOO, stale state, uncertain creation, changed contacts, DB outage/conflict/lost acknowledgement, revoked stale approval |
 | `tests/outreach/reply-process-cli.test.ts` | Missing intent, malformed IDs, and unexpected arguments reject before provider/database use |
 
-Run new integration tests only with `RELAY_DRAFT_TEST_DATABASE_URL` set to a
-disposable direct Postgres connection. The response tests create/drop a unique
-schema, apply all migrations, and inject fake Gmail/classification providers.
-The full suite still also needs `DATABASE_URL` pointed at that disposable
-database. `npm test` now refuses to start unless
-`RELAY_TEST_DATABASE_DISPOSABLE=true` and **both** database URLs target a
-loopback PostgreSQL database named `relay_test`. Set these explicitly for the
-test command; a remote Neon URL from `.env` is not safe. Never use the
-application database to run migration-based tests.
+Database-backed tests require `RELAY_TEST_DATABASE_DISPOSABLE=true` and **both**
+`DATABASE_URL` and `RELAY_DRAFT_TEST_DATABASE_URL` to target a loopback
+PostgreSQL database named `relay_test`. This configuration is mandatory for
+focused database-backed tests as well as `npm test`; a remote Neon URL from
+`.env` is not safe. The full-suite pretest guard validates the effective
+connection target so URL options cannot redirect the connection to another host
+or database. The intake and research focused database suites also import that
+guard in-process. Older focused database suites do not universally enforce it
+when run directly, so operators must verify the guarded local configuration
+before invoking them. The response tests create/drop a unique schema, apply all
+migrations, and inject fake Gmail/classification providers. Never use an
+application or production database to run migration-based tests.
+
+Some database-backed tests skip when their database URL is unavailable. A skip
+of a safety-critical database test means that behavior remains unverified; it
+must be reported as incomplete, not described as passing.
 
 ## Follow-up drafting and approved sending
 
@@ -1042,29 +1060,57 @@ No live flag, scheduler, deployment, or Gmail operation was enabled by this work
 | `tests/outreach/follow-up-boundaries.test.ts` | Initial-outreach tools reject follow-up approval/queue/claim/reconciliation |
 | `tests/outreach/follow-up-pipeline.test.ts` | Disposable-schema migration, preserved templates/signature, two-touch scheduling, concurrent reservations, approval fingerprint, newer replies, MIME snapshots, uncertainty, database outages, lost acknowledgement and stale approval |
 
-## Prospect research migration
+## Prospect intake migration
+
+Migration 012 creates `prospect_intake_requests`, the durable one-row-per-
+prospect and one-row-per-identity intake journal. Identical retries return the
+persisted journal request ID, including when the duplicate supplied a different
+unused request ID. Concurrent identical submissions converge on one prospect
+and one journal row. Reusing a request ID with different input, or reusing an
+identity with different input, fails closed.
+
+| Test | What it protects |
+| --- | --- |
+| `tests/intake/prospect-intake-input.test.ts` | Strict normalized input, explicit CLI confirmation, and rejection of unsafe URLs, invalid email, and unknown fields |
+| `tests/intake/prospect-intake.test.ts` | Migration 012, atomic prospect/journal creation, authoritative duplicate request ID, concurrent convergence, and request-ID/identity conflict rejection |
+
+The database-backed intake test uses fake/local inputs and a unique schema on
+the guarded disposable `relay_test` database. It does not call any external
+provider.
+
+## Prospect research migrations
 
 Step 5 adds migration 011 and the separately confirmed `npm run research`
-command. It stores scraped page evidence and a validated research result before
-creating a Drive folder, Google Docs brief, or Gmail draft. A public email must
-appear on its cited page; missing contacts and C-fit prospects retain a brief
-without a draft. Created outreach drafts still require human review and separate
-approval. Each provider creation has a committed journal state; uncertain
-outcomes require reconciliation instead of automatic recreation. See
+command. Migration 013 adds
+`gmail_draft_allowed BOOLEAN NOT NULL DEFAULT false`; existing/default rows are
+therefore Gmail-disabled. Normal `start` explicitly stores true and `start-safe`
+explicitly stores false. `resume` and `retry-pre-artifact` preserve the stored
+database policy, and Gmail draft creation is allowed only when that value is the
+literal boolean true. A safe request still completes research and Drive artifact
+creation, then reaches `research_review` without Gmail or a `message_drafts` row.
+
+The pipeline stores scraped page evidence and a validated research result before
+creating a Drive folder, Google Docs brief, or permitted Gmail draft. A public
+email must appear on its cited page; missing contacts and C-fit prospects retain
+a brief without a draft. Created outreach drafts still require human review and
+separate approval. Each provider creation has a committed journal state;
+uncertain outcomes require reconciliation instead of automatic recreation. See
 `Relay_Migration_Plan.md` for setup, supported scope, and external acceptance.
 
 | Test | What it protects |
 | --- | --- |
-| `tests/research/research-contract.test.ts` | Safe same-origin link selection, exact source and public-email evidence, strict object/string validation, tool-free provider requests, and explicit CLI confirmation |
-| `tests/research/prospect-research.test.ts` | Disposable-schema migration, review-only success, missing-contact and C-fit holds, concurrent reservation, retained Drive IDs after failure, uncertain Gmail creation, duplicate blocking, and resume from a verified brief checkpoint |
+| `tests/research/research-contract.test.ts` | Safe same-origin link selection, exact source and public-email evidence, strict object/string validation, tool-free provider requests, and distinct explicit confirmation for `start` and `start-safe` |
+| `tests/research/prospect-research.test.ts` | Migrations 011 and 013, conservative default for existing rows, normal/safe stored policy, review-only success, safe `research_review` without Gmail, missing-contact and C-fit holds, concurrent reservation, retained Drive IDs after failure, uncertain Gmail creation, duplicate blocking, and stored-policy preservation across resume/retry |
 
-The integration test uses `RELAY_DRAFT_TEST_DATABASE_URL` with a disposable
-Postgres database and fake provider implementations. No live Firecrawl,
+The integration test uses both guarded database URLs with a disposable local
+`relay_test` database and fake provider implementations. No live Firecrawl,
 OpenAI, Drive, or Gmail calls occur during the suite.
 
 Follow-up send tests call only a fake API: its `drafts.send` method asserts the
 approved raw snapshot and disabled retries. They do not call Gmail, enable the
-live-send flag, or start the production worker. New integration tests require
-`RELAY_DRAFT_TEST_DATABASE_URL` pointing at a disposable direct Postgres database.
+live-send flag, or start the production worker. Database-backed focused tests
+must use the same guarded two-URL and disposable-confirmation configuration
+described above. The intake and research suites enforce it in-process; older
+focused database suites rely on the operator to supply it correctly.
 Requests/attempts are durable blocks, not permission to automatically retry;
 production recovery tooling and controlled external acceptance remain pending.
