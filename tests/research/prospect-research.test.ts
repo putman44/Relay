@@ -1,3 +1,4 @@
+import '../../scripts/check-test-database.js';
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
@@ -7,9 +8,7 @@ import { startProspectResearch, resumeProspectResearch, retryFailedPreArtifactRe
   type ResearchDependencies } from '../../src/research/prospect-research.js';
 import type { DriveArtifact } from '../../src/research/drive-artifacts.js';
 
-test('Prospect research journals external artifacts and creates only review drafts', {
-  skip: !process.env.RELAY_DRAFT_TEST_DATABASE_URL,
-}, async t => {
+test('Prospect research journals external artifacts and creates only review drafts', async t => {
   const connectionString = process.env.RELAY_DRAFT_TEST_DATABASE_URL!;
   const schema = `relay_research_test_${randomUUID().replaceAll('-', '')}`;
   const admin = new Pool({ connectionString });

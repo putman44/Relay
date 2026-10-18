@@ -1,3 +1,4 @@
+import '../../scripts/check-test-database.js';
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
@@ -5,9 +6,7 @@ import { test } from 'node:test';
 import { Pool } from 'pg';
 import { createProspectFromIntake, type ProspectIntakeInput } from '../../src/intake/prospect-intake.js';
 
-test('Prospect intake: durable creation, idempotency and duplicate protection', {
-  skip: !process.env.RELAY_DRAFT_TEST_DATABASE_URL,
-}, async t => {
+test('Prospect intake: durable creation, idempotency and duplicate protection', async t => {
   const connectionString = process.env.RELAY_DRAFT_TEST_DATABASE_URL!;
   const schema = `relay_intake_test_${randomUUID().replaceAll('-', '')}`;
   const admin = new Pool({ connectionString });
