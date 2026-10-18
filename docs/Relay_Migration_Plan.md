@@ -14,7 +14,7 @@ Postgres and an operator UI remains an explicit product decision.
 | 2 | Reply monitoring | Implemented locally: full-thread reading, durable inbound identities, cold-outreach suppression, bounded polling, and unavailable-thread handling. External acceptance and scheduling remain |
 | 3 | Classification and response drafts | Implemented locally: validated classification, exact-reply-bound review drafts, stale approval invalidation, opt-out/automatic-message safety, and durable creation journals. External acceptance and managed response approval/send remain |
 | 4 | Follow-up drafting and sending | Implemented locally: explicit-zone calendar timing, two-touch cap, source-bound drafts/approval, live inbound/MIME preflight, durable send claims and uncertain-send holds. Deployment, scheduling, controlled external acceptance and guarded recovery remain |
-| 5 | Prospect research | Implemented locally: bounded public-site evidence, strict sourced output, Drive folder/brief and review-only Gmail draft, missing-contact/low-fit holds, durable creation journals and safe checkpoint resume. Provider scopes, deployment, controlled external acceptance, and remaining n8n search/map/Airtable parity remain |
+| 5 | Prospect intake and research | Implemented locally: durable idempotent intake, bounded public-site evidence, strict sourced output, Drive folder/brief, stored Gmail-draft policy, missing-contact/low-fit holds, durable creation journals and safe checkpoint resume. Provider scopes, deployment, controlled external acceptance, and remaining n8n search/map/Airtable parity remain |
 | 6 | Client onboarding | Pending: client identity, onboarding/task uniqueness, safe retries, and exact expected-task reconciliation |
 
 No step is production-complete solely because local tests pass. Keep n8n disabled
@@ -26,22 +26,64 @@ have replacements or are explicitly removed from scope.
 
 Migration 011 adds the `research_in_progress`, `needs_contact`, and
 `research_review` stages, an `industry` field, and one durable research request
-per prospect. Apply it through the reviewed migration process before running
-the new `npm run research` command. Migrations 007-011 were applied to the
-development Neon database on October 16, 2026; production Neon and the droplet
-are unchanged.
+per prospect. Migration 012 creates the durable `prospect_intake_requests`
+journal. Migration 013 adds `gmail_draft_allowed BOOLEAN NOT NULL DEFAULT false`
+to each research request. Apply each migration through the reviewed migration
+process before using its corresponding command. Migrations 007-011 were applied
+to the development Neon database on October 16, 2026; this documentation change
+does not claim that migrations 012-013 were applied to development, production,
+or the droplet.
+
+### Durable prospect intake
+
+`npm run prospect:add` accepts an explicitly confirmed private JSON input and
+creates a `researching` prospect together with its intake journal row in one
+transaction. The normalized website origin is the existing intake identity;
+this work does not change or expand that canonicalization policy.
+
+An identical repeat of the same request is idempotent. An identical submission
+for an already journaled identity, including one carrying a new request ID,
+returns the authoritative request ID already persisted in
+`prospect_intake_requests`. Concurrent identical submissions therefore converge
+on one prospect and one durable journal row. The unused caller-supplied request
+ID is not persisted. Reusing a request ID for different input, or submitting
+different input for an existing identity, fails closed for inspection rather
+than updating or duplicating the prospect.
+
+```bash
+npm run prospect:add -- --input /absolute/path/to/private-prospect.json --confirm-create-prospect
+```
+
+The command writes Postgres but does not call Firecrawl, OpenAI, Drive, or Gmail.
+Do not commit real prospect input files.
+
+### Stored Gmail-draft policy
+
+Migration 013 conservatively marks existing research requests and newly inserted
+rows as Gmail-disabled unless the start path explicitly stores otherwise. Normal
+`start` persists `gmail_draft_allowed = true`; `start-safe` persists `false`.
+`resume` and `retry-pre-artifact` do not derive policy from the current command
+or reconstructed dependencies: they continue using the value stored on the
+durable request. Gmail draft creation is reachable only when that stored value
+is the literal boolean `true`. A Gmail-disabled request can still complete
+research and verified Drive artifacts, then ends in `research_review` without a
+Gmail draft or `message_drafts` row.
 
 `start` requires a researching prospect with a supplied HTTPS business website,
 an explicit Drive parent folder ID, and a confirmation flag. It reserves the
 prospect before any provider call. Relay scrapes the supplied website and up to
-four safe same-origin page links discovered on its first page. Contact and
-inquiry paths rank first, then business/service paths; other safe page links
+four safe same-site page links discovered on its first page. Research treats an
+apex host and its `www` host as the same site when the HTTPS scheme matches.
+Contact and inquiry paths rank first, then business/service paths; other safe page links
 fill remaining slots in their discovered order. Asset links are excluded.
 The saved evidence reports skipped out-of-scope links, assets, and pages beyond
 the four-page follow-up limit separately from pages that were selected but
 failed verification. It does not run the old n8n general web search or map phase. Firecrawl
-scrape responses must report the exact requested source URL and successful HTTP
-status. The model receives only those saved pages, has no tools, and must return
+scrape responses must report a source URL equivalent to the requested URL and a
+successful HTTP status. Equivalent means the same HTTPS scheme and path, with
+apex/`www` hosts and a trailing slash treated as the same. A reported final URL
+may be absent; when present, it must be a string that passes the same check.
+Saved pages keep the requested URL. The model receives only those saved pages, has no tools, and must return
 the exact research schema. Relay validates sources against fetched pages and
 requires a recommended email to appear on its cited page. This is structural
 evidence checking; a person must still assess whether claims and copy are true.
@@ -62,10 +104,10 @@ lists evidenced public email and phone links with their source pages separately
 from the selected contact record. Proposed outreach appears only for A/B fit
 outside the Dev by Taylor site; it is omitted for C fit and owned-site research.
 Gmail copy receives the existing authored Relay signature.
-For a controlled research-only acceptance run, an explicit dependency mode
-stops after verified Drive artifacts in `research_review`, regardless of fit or
-public contact; it never enters Gmail draft creation. The normal CLI path does
-not enable this mode.
+For a controlled research-only run, `start-safe` stores Gmail-disabled policy
+before provider work. It stops after verified Drive artifacts in
+`research_review`, regardless of fit or public contact, and never enters Gmail
+draft creation. The normal `start` path stores Gmail-enabled policy instead.
 
 Each external create call has a committed `*_creating` state first and disables
 automatic transport retries. Returned IDs are retained if local finalization
@@ -98,14 +140,18 @@ in the repository.
 ```bash
 npm run research -- status --prospect PROSPECT_UUID
 npm run research -- start --prospect PROSPECT_UUID --confirm-research
+npm run research -- start-safe --prospect PROSPECT_UUID --confirm-research-only
 npm run research -- resume --request REQUEST_UUID --confirm-resume
 npm run research -- retry-pre-artifact --request REQUEST_UUID --confirm-retry-pre-artifact
 ```
 
-The three mutation commands can incur Firecrawl/OpenAI usage and create Drive/Gmail
-artifacts. The status command prints IDs and state without exposing the research
-content. Inspect a failed request before the explicit pre-artifact retry; never
-use it for `*_creating`, `needs_reconciliation`, or a request with artifact IDs. Firecrawl
+The four mutation commands can incur Firecrawl/OpenAI usage and create Drive
+artifacts. Normal `start`, and a `resume` or `retry-pre-artifact` whose stored
+policy is true, may also create a Gmail draft. `start-safe`, and every resumed or
+retried request whose stored policy is false, cannot create one. The status
+command prints IDs and state without exposing the research content. Inspect a
+failed request before the explicit pre-artifact retry; never use it for
+`*_creating`, `needs_reconciliation`, or a request with artifact IDs. Firecrawl
 may follow redirects or resolve DNS inside its service; Relay validates the
 requested and reported source URL but cannot prove Firecrawl's internal fetch
 path. A controlled development run on the owned Dev by Taylor site verified
@@ -115,10 +161,24 @@ Production still needs its own read-only configuration/schema preflight and a
 separately approved rollout; Gmail draft appearance and operator review remain
 unverified for this research path.
 
-Local verification on October 17, 2026: typecheck and 272/272 full regression
-tests passed. Research integration tests use fake Firecrawl, OpenAI, Drive, and
-Gmail providers plus disposable localhost Postgres. The test run made no live
-provider request, production migration, send, or worker invocation.
+Historical verification checkpoint on October 17, 2026: typecheck and 272/272
+full regression tests passed for the code at that checkpoint, including the
+then-current step 5 research tests. That checkpoint predates the later durable
+prospect-intake and stored Gmail-draft-policy changes and does not validate
+them. Those later changes have focused test coverage, described in
+[Relay Testing & Worker Guide](Relay_Testing_and_Worker_Guide.md). The October
+17 run used fake Firecrawl, OpenAI, Drive, and Gmail providers plus disposable
+localhost Postgres; it made no live provider request, production migration,
+send, or worker invocation.
+
+Historical regression verification on October 18, 2026, separate from the
+October 17 checkpoint: a guarded full-suite run against the local disposable
+`relay_test` database passed 285/285 tests, with 0 failed and 0 skipped, for the
+branch state at that time. No live Firecrawl, OpenAI, Drive, or Gmail operations
+were performed. That run predates the later research status output,
+prospect-intake JSON parse-error, and Firecrawl metadata validation changes, so
+it does not verify the current branch. No full-suite result is recorded yet for those
+changes.
 
 ## First slice: supplied outreach copy to a reviewable Gmail draft
 
@@ -243,21 +303,40 @@ actual-draft preflight. A focused rerun verified the final preflight guard also
 preserves approval revoked during inspection. No live Gmail operations were
 performed.
 
-The new integration tests require `RELAY_DRAFT_TEST_DATABASE_URL` pointing to a
-disposable, direct Postgres connection. They create a unique temporary schema,
-apply migrations there, use fake Gmail, and drop that schema afterward. They
-skip when this variable is absent. Never point it at a production database.
+Database-backed tests require both `DATABASE_URL` and
+`RELAY_DRAFT_TEST_DATABASE_URL` to target the guarded local disposable
+`relay_test` database, plus `RELAY_TEST_DATABASE_DISPOSABLE=true`. The same
+requirements apply to focused database-backed tests, not only `npm test`.
+Database-backed suites differ in how much isolation and guarding they provide:
+
+- Isolated-schema integration tests, such as the draft-creation tests, create a
+  unique temporary schema, apply migrations there, use fake Gmail, and drop that
+  schema afterward.
+- The intake and research focused suites also enforce the guarded local
+  `relay_test` configuration in-process.
+- Older focused database suites do not universally enforce that guard
+  in-process when run directly. They depend on the operator having already
+  configured the safe local `relay_test` database.
+
+The full-suite pretest guard runs only for `npm test`. Never point either URL at
+an application, production, or remote database. If a safety-critical database
+test is skipped or cannot run, verification is incomplete; it is not a passing
+result.
+
+The focused command below is not automatically guarded. Its draft-creation
+suite creates an isolated schema but does not run the guard in-process, so
+confirm the safe local `relay_test` configuration above before running it:
 
 ```bash
 npx tsx --test --test-concurrency=1 tests/gmail/gmail-draft-creator.test.ts tests/outreach/outreach-draft-content.test.ts tests/outreach/outreach-draft-creation.test.ts
 ```
 
 For a fully isolated regression run, provision a disposable database with all
-migrations and set both `DATABASE_URL` and `RELAY_DRAFT_TEST_DATABASE_URL` to its
-direct loopback connection URL before `npm test`. Also set
-`RELAY_TEST_DATABASE_DISPOSABLE=true`; the pretest guard rejects a missing
-confirmation, remote host, or database name other than `relay_test`. Existing
-tests use `DATABASE_URL`.
+migrations and set both URLs to its direct loopback connection before `npm test`.
+The guard rejects a missing disposable confirmation, a remote or redirected
+effective host, or a database name other than `relay_test`. Existing tests use
+`DATABASE_URL`; isolated-schema integration tests use
+`RELAY_DRAFT_TEST_DATABASE_URL`.
 
 ## Second slice: reply monitoring
 

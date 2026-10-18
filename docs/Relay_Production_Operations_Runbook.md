@@ -1,6 +1,6 @@
 # Relay Production Operations Runbook
 
-**Scope:** Outreach queue monitoring, scheduled execution, alert response, and safe recovery.
+**Scope:** Prospect intake, research execution, outreach queue monitoring, scheduled execution, alert response, and safe recovery.
 
 **Default posture:** Monitoring is read-only. Live outreach sending remains disabled unless an operator explicitly enables it for an approved production run.
 
@@ -14,10 +14,73 @@
 - Keep `RELAY_ENABLE_LIVE_OUTREACH_SEND` unset or set to anything other than `true` while validating monitoring and scheduling.
 - Do not start the worker merely to test the monitor. The monitor only reads Postgres.
 - Use exact job, draft, and prospect IDs for operator mutations.
+- Treat `start`, `start-safe`, `resume`, and `retry-pre-artifact` as provider-using
+  research mutations, not read-only status checks.
+- Permit research Gmail draft creation only when the durable request stores
+  `gmail_draft_allowed = true`; never infer permission from the command currently
+  being run or from available Gmail credentials.
 
 ---
 
-## 2. Read-Only Health Check
+## 2. Prospect Intake and Research
+
+Apply migrations 012 and 013 through the reviewed migration process before using
+the completed intake and stored-policy paths. Migration 012 creates the durable
+prospect intake journal. Migration 013 adds
+`gmail_draft_allowed BOOLEAN NOT NULL DEFAULT false`, so existing and defaulted
+research rows are conservatively Gmail-disabled.
+
+### Intake
+
+```bash
+npm run prospect:add -- --input /absolute/path/to/private-prospect.json --confirm-create-prospect
+```
+
+Successful identical submissions converge on one prospect and one durable
+journal row. The result returns the authoritative persisted journal request ID,
+which may differ from a duplicate caller's proposed request ID. A request-ID or
+identity conflict with different input fails closed and requires inspection; do
+not change the ID or input merely to bypass the conflict.
+
+### Research commands and policy
+
+```bash
+npm run research -- status --prospect PROSPECT_UUID
+npm run research -- start --prospect PROSPECT_UUID --confirm-research
+npm run research -- start-safe --prospect PROSPECT_UUID --confirm-research-only
+npm run research -- resume --request REQUEST_UUID --confirm-resume
+npm run research -- retry-pre-artifact --request REQUEST_UUID --confirm-retry-pre-artifact
+```
+
+- `status` reads the durable request and prints identifiers and state without
+  exposing research content.
+- `start` explicitly persists `gmail_draft_allowed = true`. For an eligible A/B
+  result with a public contact, it may create the review-only Gmail draft after
+  research and Drive artifacts succeed.
+- `start-safe` explicitly persists `gmail_draft_allowed = false`. Research and
+  Drive artifact creation continue, but the request finishes in
+  `research_review` without calling Gmail or creating a `message_drafts` row.
+- `resume` continues only from an allowed durable checkpoint and uses the stored
+  Gmail policy. It does not upgrade a safe request because Gmail dependencies or
+  credentials are now available.
+- `retry-pre-artifact` reuses the same failed request only when its guarded
+  pre-artifact conditions pass. It also uses the stored Gmail policy and cannot
+  convert a safe request into a Gmail-enabled request.
+
+Only the literal stored value `true` permits Gmail draft creation. Do not edit
+that value as an operational shortcut. Inspect `*_creating`,
+`needs_reconciliation`, or changed-input requests instead of retrying them.
+
+Local and automated verification uses fake Firecrawl, OpenAI, Drive, and Gmail
+providers plus disposable local Postgres. Those results establish application
+behavior without authorizing or proving live operation. The mutation commands
+above use configured providers: run them against live or production systems only
+as a separately approved operation with the intended database, scopes, Drive
+parent, prospect/request ID, and stored Gmail policy verified first.
+
+---
+
+## 3. Read-Only Health Check
 
 Run from the Relay project directory:
 
@@ -55,7 +118,7 @@ Exit code `2` is an operational alert, not a monitor crash.
 
 ---
 
-## 3. Inspection and Recovery
+## 4. Inspection and Recovery
 
 Inspect the non-completed queue:
 
@@ -79,7 +142,7 @@ That command resolves reconciliation and requeues the same failed job. It preser
 
 ---
 
-## 4. Scheduler Contract
+## 5. Scheduler Contract
 
 No scheduler is activated by this repository change. When production scheduling is explicitly approved, configure the host scheduler to meet this contract:
 
@@ -121,7 +184,7 @@ No worker service or timer is included. Worker scheduling remains a separate pro
 
 ---
 
-## 5. Deployment Checklist
+## 6. Deployment Checklist
 
 1. Confirm `npm run typecheck` passes.
 2. Confirm `npm test` passes.
@@ -137,7 +200,7 @@ No worker service or timer is included. Worker scheduling remains a separate pro
 
 ---
 
-## 6. Disable and Roll Back
+## 7. Disable and Roll Back
 
 If behavior is unexpected:
 

@@ -1,12 +1,14 @@
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { collectResearchEvidence, safeResearchUrl } from '../../src/research/research-evidence.js';
+import { collectResearchEvidence, equivalentResearchSourceUrl, safeResearchUrl } from '../../src/research/research-evidence.js';
 import { renderResearchBrief, ResearchValidationError, validateResearchResult,
   type ResearchResult } from '../../src/research/research-result.js';
 import { createFirecrawlScraper } from '../../src/research/firecrawl-scraper.js';
 import { createOpenAIResearcher } from '../../src/research/openai-researcher.js';
 import { parseResearchArgs } from '../../src/operator/research-input.js';
+import { researchMutationOutput, researchStatusOutput } from '../../src/operator/research-output.js';
+import type { ResearchRequest } from '../../src/research/prospect-research.js';
 
 const root = 'https://business.example.com/';
 const contact = 'https://business.example.com/contact';
@@ -42,6 +44,28 @@ test('Research URLs and crawl stay on safe discovered pages', async () => {
   assert.deepEqual(calls, [root, contact]);
   assert.equal(pages.pages.length, 2);
   assert.ok(pages.limitations.some(item => item.includes('outside the safe same-site page scope')));
+});
+
+test('Research crawl treats apex and www as one site under the same scheme', async () => {
+  for (const [site, alternate] of [['https://example.com/', 'https://www.example.com/'],
+    ['https://www.example.com/', 'https://example.com/']] as const) {
+    const calls: string[] = [];
+    const collected = await collectResearchEvidence(site, async url => {
+      calls.push(url);
+      return { url, markdown: `Public page at ${url}`, links: url === site ? [`${alternate}contact`,
+        'https://www.example.net/contact', `http://${new URL(alternate).hostname}/services`] : [] };
+    });
+    assert.deepEqual(calls, [site, `${alternate}contact`]);
+    assert.deepEqual(collected.pages.map(page => page.url), [site, `${alternate}contact`]);
+    assert.ok(collected.limitations.includes('Skipped 2 links outside the safe same-site page scope.'));
+  }
+});
+
+test('Research accepts only equivalent apex/www source URLs', () => {
+  assert.equal(equivalentResearchSourceUrl('https://business.example.com/', 'https://www.business.example.com/'), true);
+  assert.equal(equivalentResearchSourceUrl('https://www.business.example.com/contact/', 'https://business.example.com/contact'), true);
+  assert.equal(equivalentResearchSourceUrl('https://business.example.com/contact', 'https://www.business.example.com/about'), false);
+  assert.equal(equivalentResearchSourceUrl('https://business.example.com/', 'https://evil.example.com/'), false);
 });
 
 test('Research follows branded same-site pages and prioritizes contact paths within its budget', async () => {
@@ -162,6 +186,20 @@ test('Firecrawl adapter accepts only a successful matching source', async () => 
     } }) };
   });
   assert.equal((await scraper(root)).url, root);
+
+  const canonical = createFirecrawlScraper('fake-key', async () => ({ ok: true,
+    text: async () => JSON.stringify({ success: true, data: { markdown: 'Business', links: [],
+      metadata: { sourceURL: 'https://www.business.example.com/', url: 'https://www.business.example.com/', statusCode: 200 } } }) }));
+  assert.equal((await canonical(root)).url, root);
+
+  const withFinalUrl = (url: unknown) => createFirecrawlScraper('fake-key', async () => ({ ok: true,
+    text: async () => JSON.stringify({ success: true, data: { markdown: 'Business', links: [],
+      metadata: { sourceURL: root, url, statusCode: 200 } } }) }));
+  assert.equal((await withFinalUrl(null)(root)).url, root);
+  for (const finalUrl of [[root], 200, { href: root }, true, '', 'https://evil.test/']) {
+    await assert.rejects(withFinalUrl(finalUrl)(root), /provenance or content is invalid/);
+  }
+
   await assert.rejects(createFirecrawlScraper('fake-key', async () => ({ ok: true,
     text: async () => JSON.stringify({ success: true, data: { markdown: 'Wrong', links: [],
       metadata: { sourceURL: 'https://evil.test/', statusCode: 200 } } }) }))(root));
@@ -190,9 +228,27 @@ test('OpenAI research adapter is tool-free and requires one completed text resul
 test('Research CLI requires explicit confirmation before provider access', () => {
   const id = randomUUID();
   assert.deepEqual(parseResearchArgs(['start', '--prospect', id, '--confirm-research']), { action: 'start', prospectId: id });
+  assert.deepEqual(parseResearchArgs(['start-safe', '--prospect', id, '--confirm-research-only']),
+    { action: 'start-safe', prospectId: id });
   assert.throws(() => parseResearchArgs(['start', '--prospect', id]));
+  assert.throws(() => parseResearchArgs(['start-safe', '--prospect', id]));
+  assert.throws(() => parseResearchArgs(['start-safe', '--prospect', id, '--confirm-research']));
   assert.throws(() => parseResearchArgs(['resume', '--request', id]));
   assert.deepEqual(parseResearchArgs(['retry-pre-artifact', '--request', id, '--confirm-retry-pre-artifact']),
     { action: 'retry-pre-artifact', requestId: id });
   assert.throws(() => parseResearchArgs(['retry-pre-artifact', '--request', id]));
+});
+
+test('Research CLI output shows the stored Gmail-draft policy', () => {
+  const stored = { id: randomUUID(), prospect_id: randomUUID(), status: 'completed', folder_id: 'folder',
+    brief_id: 'brief', brief_url: 'https://docs.google.com/document/d/brief', gmail_draft_id: null,
+    gmail_draft_allowed: false, last_error: null } as ResearchRequest;
+  assert.deepEqual(researchStatusOutput(stored), { id: stored.id, prospectId: stored.prospect_id, status: 'completed',
+    folderId: 'folder', briefId: 'brief', briefUrl: stored.brief_url, gmailDraftId: null,
+    gmailDraftAllowed: false, lastError: null });
+  assert.equal(researchStatusOutput(null), null);
+  assert.equal(researchStatusOutput({ ...stored, gmail_draft_allowed: true })?.gmailDraftAllowed, true);
+  assert.deepEqual(researchMutationOutput(stored), { id: stored.id, prospectId: stored.prospect_id, status: 'completed',
+    folderId: 'folder', briefId: 'brief', briefUrl: stored.brief_url, gmailDraftId: null, gmailDraftAllowed: false });
+  assert.equal(researchMutationOutput({ ...stored, gmail_draft_allowed: true }).gmailDraftAllowed, true);
 });

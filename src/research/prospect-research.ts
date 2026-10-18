@@ -16,14 +16,15 @@ export type ResearchRequest = {
   drive_parent_id: string; evidence: ResearchEvidence | null; result: ResearchResult | null;
   folder_id: string | null; brief_id: string | null; brief_url: string | null;
   gmail_draft_id: string | null; gmail_message_id: string | null; gmail_thread_id: string | null;
+  gmail_draft_allowed: boolean;
   last_error: string | null;
   updated_at: Date;
 };
 type ProspectRow = ResearchInput & { id: string; stage: string; cold_outreach_blocked: boolean;
   communication_opted_out: boolean };
 export type ResearchDependencies = { database: Pool; scrape: PageScraper; research: Researcher;
-  drive: ResearchDrive; createGmailDraft: GmailDraftCreator; driveParentId: string;
-  draftMode?: 'research_only' };
+  drive: ResearchDrive; createGmailDraft: GmailDraftCreator; driveParentId: string };
+export type ResearchStartPolicy = { gmailDraftAllowed: boolean };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const snapshot = (row: ResearchInput): ResearchInput => ({ company_name: row.company_name, website: row.website,
@@ -92,7 +93,8 @@ async function hold(pool: Pool, id: string, owner: string, from: Status,
   } catch { /* A creating row is itself a durable block when Postgres is unavailable. */ }
 }
 
-export async function startProspectResearch(prospectId: string, deps: ResearchDependencies): Promise<ResearchRequest> {
+export async function startProspectResearch(prospectId: string, deps: ResearchDependencies,
+  policy: ResearchStartPolicy): Promise<ResearchRequest> {
   if (!UUID.test(prospectId) || !validDriveId(deps.driveParentId)) throw new Error('Valid prospect and Drive parent IDs are required.');
   const id = randomUUID(), owner = randomUUID();
   await transaction(deps.database, async client => {
@@ -104,9 +106,9 @@ export async function startProspectResearch(prospectId: string, deps: ResearchDe
       UNION ALL SELECT 1 FROM message_drafts WHERE prospect_id = $1 AND draft_type = 'outreach' LIMIT 1`, [prospectId]);
     if (conflict.rowCount) throw new Error('Prospect already has an outreach request or draft.');
     await client.query(`INSERT INTO prospect_research_requests
-      (id, prospect_id, status, owner_token, input_snapshot, drive_parent_id)
-      VALUES ($1,$2,'researching',$3,$4,$5)`,
-    [id, prospectId, owner, JSON.stringify(snapshot(prospect)), deps.driveParentId]);
+      (id, prospect_id, status, owner_token, input_snapshot, drive_parent_id, gmail_draft_allowed)
+      VALUES ($1,$2,'researching',$3,$4,$5,$6)`,
+    [id, prospectId, owner, JSON.stringify(snapshot(prospect)), deps.driveParentId, policy.gmailDraftAllowed]);
     await client.query("UPDATE prospects SET stage = 'research_in_progress', updated_at = now() WHERE id = $1", [prospectId]);
   });
   return runResearch(id, owner, deps);
@@ -298,7 +300,7 @@ async function runResearch(id: string, owner: string, deps: ResearchDependencies
       await hold(deps.database, id, owner, 'brief_ready');
       throw new Error(`Research artifacts for ${id} could not be verified.`, { cause: error });
     }
-    if (deps.draftMode === 'research_only') {
+    if (request.gmail_draft_allowed !== true) {
       return finishWithoutDraft(deps.database, id, owner, result, 'research_review');
     }
     if (result.fit === 'C') return finishWithoutDraft(deps.database, id, owner, result, 'research_review');

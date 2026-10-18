@@ -9,6 +9,13 @@ const BUSINESS_PATH = /(?:^|\/)(?:about|services?|solutions?|offerings?|products
 const NON_PAGE_PATH = /\.(?:pdf|png|jpe?g|gif|webp|svg|ico|css|js|zip|mp[34]|mov)$/i;
 const ACTION = /(?:login|logout|sign-?in|account|cart|checkout|delete|admin|wp-admin|subscribe|unsubscribe|payment|pay)/i;
 
+const siteHostname = (hostname: string): string => hostname.toLowerCase().replace(/^www\./, '');
+const normalizedPath = (pathname: string): string => pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
+
+function sameResearchSite(a: URL, b: URL): boolean {
+  return a.protocol === b.protocol && a.port === b.port && siteHostname(a.hostname) === siteHostname(b.hostname);
+}
+
 export function safeResearchUrl(raw: string, origin?: string): string {
   if (typeof raw !== 'string' || raw.length > 2048 || /[\x00-\x20\x7f]/.test(raw)) throw new Error('Unsafe research URL.');
   let url: URL;
@@ -18,9 +25,23 @@ export function safeResearchUrl(raw: string, origin?: string): string {
     || /(?:^|\.)(?:localhost|local|internal|invalid|test|example)$/.test(url.hostname)
     || /%(?:0[0-9a-f]|1[0-9a-f]|2f|5c|7f)/i.test(raw)
     || ACTION.test(url.pathname)) throw new Error('Unsafe research URL.');
-  if (origin && url.origin !== origin) throw new Error('Research URL left the supplied website.');
+  if (origin) {
+    let supplied: URL;
+    try { supplied = new URL(origin); } catch { throw new Error('Research URL left the supplied website.'); }
+    if (!sameResearchSite(url, supplied)) throw new Error('Research URL left the supplied website.');
+  }
   url.hash = '';
   return url.href;
+}
+
+export function equivalentResearchSourceUrl(requested: string, reported: string): boolean {
+  try {
+    const expected = new URL(safeResearchUrl(requested));
+    const actual = new URL(safeResearchUrl(reported));
+    return sameResearchSite(expected, actual) && normalizedPath(expected.pathname) === normalizedPath(actual.pathname);
+  } catch {
+    return false;
+  }
 }
 
 export function validateResearchEvidence(input: unknown, seedUrl: string): ResearchEvidence {
