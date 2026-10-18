@@ -20,12 +20,13 @@ export function createFirecrawlScraper(key = process.env.FIRECRAWL_API_KEY, tran
     const data = payload.data;
     const sourceUrl = typeof data?.metadata?.sourceURL === 'string' ? data.metadata.sourceURL : '';
     const finalUrl = typeof data?.metadata?.url === 'string' ? data.metadata.url : '';
+    const statusCode = data?.metadata?.statusCode;
     if (payload.success !== true || typeof data?.markdown !== 'string' || !data.markdown.trim()
       || Buffer.byteLength(data.markdown) > 30000 || !Array.isArray(data.links)
       || data.links.length > 100 || data.links.some(link => typeof link !== 'string' || link.length > 2048)
       || !equivalentResearchSourceUrl(url, sourceUrl)
       || (finalUrl && !equivalentResearchSourceUrl(url, finalUrl))
-      || typeof data.metadata.statusCode !== 'number' || data.metadata.statusCode < 200 || data.metadata.statusCode >= 300) {
+      || typeof statusCode !== 'number' || statusCode < 200 || statusCode >= 300) {
       throw new Error('Research scrape provenance or content is invalid.');
     }
     return { url, markdown: data.markdown, links: data.links as string[] };
