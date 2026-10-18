@@ -1,0 +1,6 @@
+interface:
+  display_name: "Relay Review"
+  short_description: "Read-only review of Relay changes"
+
+policy:
+  allow_implicit_invocation: false
