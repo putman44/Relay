@@ -42,6 +42,30 @@ which may differ from a duplicate caller's proposed request ID. A request-ID or
 identity conflict with different input fails closed and requires inspection; do
 not change the ID or input merely to bypass the conflict.
 
+### Operator intake UI
+
+```bash
+npm run intake:ui
+```
+
+The intake UI is an internal operator tool, not a public form, and has no
+authentication. It listens only on `127.0.0.1` (port `RELAY_INTAKE_UI_PORT`,
+default `4310`) and serves a form, a review step, and an explicit confirmation
+that creates the prospect through the same intake path as `prospect:add`, with
+the same idempotency, duplicate, and conflict behavior. It writes the database
+configured by `DATABASE_URL`; verify that target before starting it. It does not
+call Firecrawl, OpenAI, Drive, or Gmail and does not start research.
+
+- The server generates each intake request ID and carries it through review and
+  confirmation.
+- A conflict page means nothing was created or changed. Inspect the intake; do
+  not change the request ID or input to get past it.
+- An "outcome unknown" page means Relay could not confirm the result. Return to
+  the review page and confirm again unchanged with the same request ID; if that
+  also fails, stop and inspect that request ID.
+- Do not expose the port beyond loopback through proxies, tunnels, or port
+  forwarding.
+
 ### Research commands and policy
 
 ```bash
