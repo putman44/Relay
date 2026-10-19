@@ -8,6 +8,7 @@
     "test": "tsx --test --test-concurrency=1 tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "prospect:add": "tsx scripts/add-prospect.ts",
+    "intake:ui": "tsx scripts/run-intake-ui.ts",
     "draft:outreach": "tsx scripts/create-outreach-draft.ts",
     "worker:outreach": "tsx scripts/run-outreach-worker.ts",
     "monitor:outreach": "tsx scripts/monitor-outreach.ts",

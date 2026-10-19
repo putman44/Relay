@@ -28,6 +28,9 @@ export type ProspectIntakeResult = {
   created: boolean;
 };
 
+// A definite fail-closed refusal: the transaction rolled back before any write.
+export class ProspectIntakeConflictError extends Error {}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL = /^[A-Za-z0-9!#$%&'+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'+/=?^_`{|}~-]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
 const ALLOWED_KEYS = new Set([
@@ -123,7 +126,7 @@ export async function createProspectFromIntake(input: ProspectIntakeInput, datab
       [normalized.requestId])).rows[0];
     if (byRequest) {
       if (byRequest.identity_key !== identityKey || !sameSnapshot(byRequest.input_snapshot, inputSnapshot)) {
-        throw new Error('Prospect intake request ID already exists with different input; inspect before continuing.');
+        throw new ProspectIntakeConflictError('Prospect intake request ID already exists with different input; inspect before continuing.');
       }
       return existingResult(client, byRequest);
     }
@@ -133,7 +136,7 @@ export async function createProspectFromIntake(input: ProspectIntakeInput, datab
       [identityKey])).rows[0];
     if (byIdentity) {
       if (!sameSnapshot(byIdentity.input_snapshot, inputSnapshot)) {
-        throw new Error('A prospect intake already exists for this website with different input; inspect before updating it.');
+        throw new ProspectIntakeConflictError('A prospect intake already exists for this website with different input; inspect before updating it.');
       }
       return existingResult(client, byIdentity);
     }
@@ -143,7 +146,7 @@ export async function createProspectFromIntake(input: ProspectIntakeInput, datab
     for (const prospect of legacy.rows) {
       try {
         if (new URL(prospect.website!).origin.toLowerCase() === identityKey) {
-          throw new Error('A prospect already exists for this website; inspect it instead of creating another.');
+          throw new ProspectIntakeConflictError('A prospect already exists for this website; inspect it instead of creating another.');
         }
       } catch (error) {
         if (error instanceof Error && error.message.startsWith('A prospect already exists')) throw error;

@@ -1073,10 +1073,15 @@ identity with different input, fails closed.
 | --- | --- |
 | `tests/intake/prospect-intake-input.test.ts` | Strict normalized input, explicit CLI confirmation, rejection of unsafe URLs, invalid email, and unknown fields, and JSON parse errors that do not echo intake input |
 | `tests/intake/prospect-intake.test.ts` | Migration 012, atomic prospect/journal creation, authoritative duplicate request ID, concurrent convergence, and request-ID/identity conflict rejection |
+| `tests/intake/prospect-intake-conflict.test.ts` | Typed conflict errors for request-ID, identity, and legacy-site conflicts with rollback and no insert, and database failures not reported as conflicts |
+| `tests/web/intake-server.test.ts` | Operator intake UI: server-generated request ID, review before creation, explicit confirmation, validation, conflict, and unknown-outcome pages without leaked input or internal errors, HTML escaping, loopback Host/Origin enforcement, body-size and form limits, and loopback-only binding |
+| `tests/web/intake-pages.test.ts` | HTML escaping and a content security policy that allows only the inline stylesheet |
+| `tests/web/intake-ui-boundary.test.ts` | The intake UI process imports no provider modules |
 
 The database-backed intake test uses fake/local inputs and a unique schema on
 the guarded disposable `relay_test` database. It does not call any external
-provider.
+provider. The conflict and web tests use a scripted in-memory pool or a fake
+intake function on a loopback ephemeral port; they use no database or provider.
 
 ## Prospect research migrations
 
