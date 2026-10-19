@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,4 +42,25 @@ test("Intake UI process loads only intake, page, and database modules: no provid
     "src/web/intake-server.ts",
   ]);
   assert.deepEqual(packages, ["dotenv/config", "node:crypto", "node:http", "node:net", "pg"]);
+});
+
+test("Intake UI process hides unexpected startup error details", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", `${root}scripts/run-intake-ui.ts`],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        DOTENV_CONFIG_QUIET: "true",
+        RELAY_INTAKE_UI_PORT: "invalid-secret-port",
+      },
+      timeout: 5000,
+    },
+  );
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr.trim(), "Relay intake UI failed to start.");
+  assert.doesNotMatch(result.stderr, /RELAY_INTAKE_UI_PORT|invalid-secret-port/);
 });

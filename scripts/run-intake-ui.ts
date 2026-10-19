@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   process.once("SIGTERM", stop);
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : "Relay intake UI failed to start.");
+main().catch(() => {
+  console.error("Relay intake UI failed to start.");
   process.exitCode = 1;
 });
