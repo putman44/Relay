@@ -727,14 +727,86 @@ focused test.
 ### Full suite
 
 ```bash
+npm run verify
+```
+
+`npm run verify` is Relay's paved-road verification command. It requires Node.js,
+npm, the checked-in dependencies, and a running Docker daemon. It starts a
+uniquely named container and volume from the pinned official
+`pgvector/pgvector:0.8.1-pg14` image, publishes PostgreSQL only on
+`127.0.0.1` at a Docker-assigned port, and creates the disposable database
+`relay_test`. Concurrent runs do not share a container, volume, port, or
+database state.
+
+Verification accepts Docker only through an absolute local Unix-socket endpoint;
+direct TCP, SSH, and other remote endpoint schemes fail before resource
+creation. The resolved endpoint is immutable for the run. Every subsequent
+Docker readiness, setup, inspection, and cleanup command clears inherited
+`DOCKER_CONTEXT` and `DOCKER_HOST` behavior and supplies that exact endpoint to
+the Docker CLI. A concurrent `docker context use` cannot redirect the run, and
+loss of the pinned endpoint fails closed.
+
+The local Unix socket is an explicit operator trust boundary. Docker transport
+syntax cannot reliably prove whether an arbitrary local socket is backed by a
+local daemon or intentionally proxies a remote daemon. Relay therefore trusts
+an absolute local Unix-socket endpoint controlled by the local operator. An
+operator who deliberately configures that socket to proxy a remote daemon is
+outside the repository-owned verification safety guarantee. This trust boundary
+does not permit ordinary remote Docker contexts: direct TCP, SSH, and other
+remote schemes remain rejected before resource creation.
+
+Each run uses a unique database role, password, and server ownership nonce.
+Relay proves that nonce through the exact generated host database URL before
+any migration or test write, so an unrelated loopback `relay_test` database
+cannot satisfy the paved road accidentally. This ownership proof remains
+required even though the local Unix socket is operator-trusted.
+
+The command neutralizes both current dotenv 18 and legacy dotenv configuration,
+explicitly sets `RELAY_TEST_DATABASE_DISPOSABLE=true` and both database URLs for
+every child process, and runs the existing effective-target guard plus the
+ownership proof before applying all migrations in filename order. It then runs
+`npm run typecheck` and the normal `npm test` command, preserving the test
+suite's `--test-concurrency=1` setting. It never requires provider or production
+secrets and must not be used to authorize live provider operations.
+
+An exit trap removes the disposable container and volume after success,
+failure, or interruption and verifies that both are absent. Setup, guard,
+migration, typecheck, test, or cleanup-verification failure makes the command
+exit nonzero. Agents may run this one repository-owned command without separate
+database-write approval. Focused database tests, direct migration commands, and
+all existing, shared, remote, development, or production databases still
+require the authorization and safety rules in `AGENTS.md`.
+
+GitHub Actions runs the same command for pull requests targeting `main`, after
+`npm ci`, with no provider or production secrets and read-only repository token
+permissions. The stable check is named `verify`; superseded runs for the same
+pull request are cancelled. The workflow checks out
+`github.event.pull_request.head.sha` with persisted credentials disabled,
+immediately proves that `git rev-parse HEAD` equals that expected SHA, and makes
+the tested head SHA visible in the workflow summary before running verification.
+
+GitHub may associate a `pull_request` check suite or check run with the
+synthetic merge commit. That association alone neither proves nor disproves the
+head SHA tested by the workflow. A reviewer may use a successful `verify` run as
+full-suite evidence only after establishing that the reviewed fixed point is
+the pull request's current head, the run corresponds to that revision, the
+workflow explicitly checked out the event's head SHA, the checkout-identity
+proof passed, and the `verify` job succeeded. A run that is missing, stale,
+pending, failed, timed out, cancelled, superseded, or for an older pull-request
+head is not passing evidence for a newer reviewed fixed point.
+
+The lower-level command remains available only when a human has explicitly
+approved a correctly guarded disposable database target:
+
+```bash
 npm test
 ```
 
 Current healthy result:
 
 ```text
-tests 139
-pass 139
+tests 338
+pass 338
 fail 0
 ```
 

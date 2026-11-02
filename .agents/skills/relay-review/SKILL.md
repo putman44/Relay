@@ -217,7 +217,7 @@ Run focused tests only after inspecting the test, its setup, imported runtime bo
 - Does not invoke a worker or scheduler.
 - Does not modify repository files.
 
-A test that can write to any database or contact an external service requires explicit user approval before execution. Approval never permits using a production database or making a live external mutation.
+A test that can write to any database or contact an external service requires explicit user approval before execution, except for the repository-owned `npm run verify` command. That command may be run without separate database-write approval because it owns, validates, and destroys a uniquely named Docker PostgreSQL 14 + pgvector environment bound only to a Docker-assigned loopback port. This exception does not authorize focused database tests, direct migration commands, existing local PostgreSQL, or any shared, remote, development, or production database. Approval never permits using a production database or making a live external mutation.
 
 For focused tests known to be isolated, use the narrowest applicable test command. Do not bypass a required database-safety check merely to run fewer tests.
 
@@ -233,6 +233,34 @@ Record every command exactly, including its exit result. Distinguish:
 - Skipped as unsafe.
 - Skipped because approval was not provided.
 - Not applicable.
+
+GitHub may associate a `pull_request` check suite or check run with the pull
+request's synthetic merge commit rather than its head commit. That association
+alone neither proves nor disproves which head SHA the workflow tested. Never
+treat a merge-SHA check as exact-head evidence without the proof below, and do
+not require the check suite or check run's associated SHA itself to equal the
+pull-request head SHA.
+
+A successful pull-request check named `verify` may satisfy database-backed and
+full-suite verification only when the reviewer establishes all of the following:
+
+1. The reviewed fixed-point SHA equals the pull request's current head SHA.
+2. The workflow run corresponds to that pull-request revision.
+3. The workflow explicitly checked out
+   `github.event.pull_request.head.sha`.
+4. The checked-out commit verification step passed and demonstrated
+   `git rev-parse HEAD == github.event.pull_request.head.sha`.
+5. The `verify` job completed successfully.
+6. The run is not stale, cancelled, superseded, failed, timed out, or associated
+   with an older pull-request head.
+7. The pull-request head has not changed since the run. A run for an older head
+   is not passing evidence for a newer reviewed fixed point.
+
+Record the reviewed fixed-point SHA, current pull-request head SHA, tested head
+SHA reported by the workflow, and run result as evidence. Relay's exact-head
+evidence comes from verified pull-request-head identity plus successful workflow
+execution against that checkout. Missing or incomplete identity evidence is not
+passing verification.
 
 Explicitly report all skipped tests. If a safety-critical test is skipped, unavailable, or cannot safely run, verification is incomplete and the final recommendation cannot be **merge**.
 
