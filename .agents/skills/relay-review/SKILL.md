@@ -217,7 +217,7 @@ Run focused tests only after inspecting the test, its setup, imported runtime bo
 - Does not invoke a worker or scheduler.
 - Does not modify repository files.
 
-A test that can write to any database or contact an external service requires explicit user approval before execution. Approval never permits using a production database or making a live external mutation.
+A test that can write to any database or contact an external service requires explicit user approval before execution, except for the repository-owned `npm run verify` command. That command may be run without separate database-write approval because it owns, validates, and destroys a uniquely named Docker PostgreSQL 14 + pgvector environment bound only to a Docker-assigned loopback port. This exception does not authorize focused database tests, direct migration commands, existing local PostgreSQL, or any shared, remote, development, or production database. Approval never permits using a production database or making a live external mutation.
 
 For focused tests known to be isolated, use the narrowest applicable test command. Do not bypass a required database-safety check merely to run fewer tests.
 
@@ -233,6 +233,8 @@ Record every command exactly, including its exit result. Distinguish:
 - Skipped as unsafe.
 - Skipped because approval was not provided.
 - Not applicable.
+
+When GitHub pull-request checks are available, a successful check named `verify` may satisfy database-backed and full-suite verification only if GitHub reports that check for the exact `HEAD` commit under review. Record both SHAs as evidence. A missing, pending, stale, failed, timed-out, or cancelled check is not passing verification and does not satisfy this requirement.
 
 Explicitly report all skipped tests. If a safety-critical test is skipped, unavailable, or cannot safely run, verification is incomplete and the final recommendation cannot be **merge**.
 

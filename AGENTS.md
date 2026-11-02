@@ -42,18 +42,19 @@ Treat every pre-existing uncommitted change, whether staged, unstaged, or untrac
 ## Databases
 
 - **No production database operations.** Do not connect to, query, or write a production database without explicit authorization for that specific operation, and never apply migrations to one. Never use a production or other non-disposable database for tests or verification. `src/db.ts` loads `.env` through `dotenv`, so `DATABASE_URL` may point at a remote production database by default.
-- **No database-writing tests without approval.** A test that can write to any database requires explicit user approval and may run only against the guarded local disposable `relay_test` environment:
+- **No database-writing tests without approval.** Except for the repository-owned `npm run verify` command described below, a test that can write to any database requires explicit user approval and may run only against the guarded local disposable `relay_test` environment:
   - `RELAY_TEST_DATABASE_DISPOSABLE=true`.
   - `DATABASE_URL` and `RELAY_DRAFT_TEST_DATABASE_URL` both set explicitly for the command to a loopback (`localhost`, `127.0.0.1`, or `[::1]`) PostgreSQL database named `relay_test`. Do not rely on `.env` for these values.
   - `npm test` enforces this through the `pretest` guard in `scripts/check-test-database.ts`. Do not bypass or weaken that guard. Focused `npx tsx --test` runs do not execute `pretest`, so confirm the same configuration yourself before running any test file that can reach a database.
 - Many tests import `src/db.ts` and write through `DATABASE_URL`; the newer integration tests write through `RELAY_DRAFT_TEST_DATABASE_URL`. Treat both as database-writing tests.
 - **Migrations.** Creating or editing migration files under `migrations/` is allowed within approved implementation scope. Applying migrations is allowed only inside an explicitly approved disposable local `relay_test` test workflow. Never apply migrations to development, shared, or production environments.
+- **Repository-owned verification exception.** Agents may run `npm run verify` without separate database-write approval. That command is the only pre-authorized database-writing workflow: it creates a uniquely named Docker-owned PostgreSQL 14 + pgvector container and volume, binds a Docker-assigned port only on `127.0.0.1`, pins both database URLs to its disposable `relay_test` database, validates the target with the existing guard, and removes the container and volume afterward. This exception does not authorize focused tests, arbitrary database commands, existing local PostgreSQL, or any shared, remote, development, or production database.
 
 ## External effects and operational commands
 
 - Do not perform live Gmail, Google Drive, Firecrawl, or OpenAI operations, run workers or schedulers, or run operator mutations without explicit authorization for that specific action.
 - Do not set or enable live-send flags, such as `RELAY_ENABLE_LIVE_OUTREACH_SEND`, in a shell, `.env`, process environment, or deployment configuration without explicit authorization for that specific action. Verification never requires them.
-- Do not run migrations or other state-changing operational commands merely for verification. Every `npm run` script other than `typecheck` and `test`, and every operational entry point under `scripts/`, operates against the configured database or live providers. Examples include `prospect:add`, `draft:outreach`, `worker:outreach`, `monitor:outreach`, `monitor:replies`, `reply:process`, `follow-up`, `research`, `outreach:operator`, and `scripts/run-migration.ts`; these examples are not exhaustive. Approved database-writing tests that apply migrations inside their own disposable `relay_test` schema are not operational commands.
+- Do not run migrations or other state-changing operational commands merely for verification. `npm run verify`, `npm run typecheck`, and `npm test` are verification commands; every other `npm run` script and every operational entry point under `scripts/` operates against the configured database or live providers. Examples include `prospect:add`, `draft:outreach`, `worker:outreach`, `monitor:outreach`, `monitor:replies`, `reply:process`, `follow-up`, `research`, `outreach:operator`, and directly invoking `scripts/run-migration.ts`; these examples are not exhaustive. Approved database-writing tests and the repository-owned verification command may apply migrations only inside their own disposable `relay_test` environment.
 
 ## Git and GitHub
 
@@ -89,6 +90,6 @@ Canonical skill definitions live in `.agents/skills/`. `.claude/skills/` holds r
 - Perform live operational mutations, such as creating or sending Gmail drafts or messages, writing to Google Drive, running a worker or scheduler, or running an operator mutation.
 - Commit, push, create or merge pull requests, or mutate GitHub state. These remain human or orchestrator responsibilities.
 
-Database-writing tests under `relay-implement` still require explicit approval and may run only against the guarded local disposable `relay_test` environment.
+Database-writing tests under `relay-implement` still require explicit approval and may run only against the guarded local disposable `relay_test` environment. The sole exception is `npm run verify`, which owns and destroys its isolated Docker database and may be run without separate database-write approval.
 
 Relay skills are explicit workflows. Run one only when the user invokes it; never select one implicitly. Codex enforces this with `policy.allow_implicit_invocation: false` in each skill's `agents/openai.yaml`, and Claude Code with `disable-model-invocation: true` in each `SKILL.md` frontmatter. If a request fits a Relay skill that the user did not invoke, name the skill so the user can invoke it.

@@ -33,7 +33,7 @@ Never do the following, even with approval. They are outside this workflow:
 
 Without explicit task-specific approval, never:
 
-- Run a test that can write to any database. Approved database-writing tests may run only against the guarded local disposable `relay_test` environment described below.
+- Run a test that can write to any database, except through the repository-owned `npm run verify` workflow. Approved database-writing tests may run only against the guarded local disposable `relay_test` environment described below.
 - Invoke any other live Gmail, Google Drive, Firecrawl, OpenAI, or external provider operation.
 
 Never use a production database for tests. Use isolated test resources, mocks, or fixtures.
@@ -51,6 +51,8 @@ Before running an approved database-writing test, confirm a guarded local dispos
 - The `pretest` guard in `scripts/check-test-database.ts` is neither bypassed nor weakened. Focused `npx tsx --test` runs skip `pretest`, so check the same conditions yourself before running them.
 
 If the configuration cannot be confirmed, do not run the test; report it as skipped.
+
+`npm run verify` is the sole pre-authorized exception to the separate database-write approval requirement. It owns, validates, and destroys a uniquely named Docker PostgreSQL 14 + pgvector environment bound only to a Docker-assigned loopback port. This exception does not authorize invoking its internal migration or test commands separately, using existing local PostgreSQL, or contacting any shared, remote, development, or production database.
 
 ## Implement safely
 

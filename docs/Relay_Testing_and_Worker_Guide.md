@@ -727,14 +727,52 @@ focused test.
 ### Full suite
 
 ```bash
+npm run verify
+```
+
+`npm run verify` is Relay's paved-road verification command. It requires Node.js,
+npm, the checked-in dependencies, and a running Docker daemon. It starts a
+uniquely named container and volume from the pinned official
+`pgvector/pgvector:0.8.1-pg14` image, publishes PostgreSQL only on
+`127.0.0.1` at a Docker-assigned port, and creates the disposable database
+`relay_test`. Concurrent runs do not share a container, volume, port, or
+database state.
+
+The command masks `.env`, explicitly sets `RELAY_TEST_DATABASE_DISPOSABLE=true`
+and both database URLs for every child process, and runs the existing effective-
+target guard before applying all migrations in filename order. It then runs
+`npm run typecheck` and the normal `npm test` command, preserving the test
+suite's `--test-concurrency=1` setting. It never requires provider or production
+secrets and must not be used to authorize live provider operations.
+
+An exit trap removes the disposable container and volume after success,
+failure, or interruption and verifies that both are absent. Setup, guard,
+migration, typecheck, test, or cleanup-verification failure makes the command
+exit nonzero. Agents may run this one repository-owned command without separate
+database-write approval. Focused database tests, direct migration commands, and
+all existing, shared, remote, development, or production databases still
+require the authorization and safety rules in `AGENTS.md`.
+
+GitHub Actions runs the same command for pull requests targeting `main`, after
+`npm ci`, with no provider or production secrets and read-only repository token
+permissions. The stable check is named `verify`; superseded runs for the same
+pull request are cancelled. A reviewer may use a successful `verify` check as
+full-suite evidence only when GitHub associates it with the exact `HEAD` commit
+being reviewed. Missing, stale, pending, failed, timed-out, or cancelled checks
+are not passing evidence.
+
+The lower-level command remains available only when a human has explicitly
+approved a correctly guarded disposable database target:
+
+```bash
 npm test
 ```
 
 Current healthy result:
 
 ```text
-tests 139
-pass 139
+tests 326
+pass 326
 fail 0
 ```
 
