@@ -22,6 +22,22 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify checked-out PR head
+        id: checked-out-head
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          actual_head_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_head_sha" != "$EXPECTED_HEAD_SHA" ]]; then
+            echo "Checked-out HEAD $actual_head_sha does not match expected PR head $EXPECTED_HEAD_SHA." >&2
+            exit 1
+          fi
+          echo "tested_head_sha=$actual_head_sha" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Relay verification commit"
+            echo "Tested PR head: \`$actual_head_sha\`"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:

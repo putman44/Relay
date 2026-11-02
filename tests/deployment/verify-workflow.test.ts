@@ -34,7 +34,13 @@ async function createFakeVerification(): Promise<FakeVerification> {
   const uuidCounterPath = join(directory, 'uuid-counter');
   const hostileEnvPath = join(directory, 'hostile.env');
   await mkdir(binDirectory);
-  await writeFile(statePath, JSON.stringify({ container: false, volume: false }));
+  await writeFile(statePath, JSON.stringify({
+    container: false,
+    volume: false,
+    activeEndpoint: 'unix:///tmp/fake-docker.sock',
+    pinnedInfoSeen: false,
+    pinnedEndpointAvailable: true,
+  }));
   await writeFile(hostileEnvPath,
     'DATABASE_URL=postgresql://hostile@127.0.0.1:59999/relay_test\n' +
     'RELAY_DRAFT_TEST_DATABASE_URL=postgresql://hostile@127.0.0.1:59999/relay_test\n');
@@ -43,7 +49,7 @@ async function createFakeVerification(): Promise<FakeVerification> {
 
   await writeExecutable(join(binDirectory, 'docker'), `#!${process.execPath}
 const { appendFileSync, readFileSync, writeFileSync } = require('node:fs');
-const args = process.argv.slice(2);
+let args = process.argv.slice(2);
 const log = process.env.FAKE_VERIFY_LOG;
 const statePath = process.env.FAKE_VERIFY_STATE;
 appendFileSync(log, 'docker ' + args.join(' ') + '\\n');
@@ -52,11 +58,25 @@ const writeState = (state) => writeFileSync(statePath, JSON.stringify(state));
 const fail = (message, code = 1) => { console.error(message); process.exit(code); };
 if (args[0] === 'context' && args[1] === 'show') console.log('fake-context');
 else if (args[0] === 'context' && args[1] === 'inspect')
-  console.log(process.env.FAKE_DOCKER_ENDPOINT || 'unix:///tmp/fake-docker.sock');
-else if (args[0] === 'info') process.exit(0);
-else if (args[0] === 'run') {
+  console.log(process.env.FAKE_DOCKER_ENDPOINT || readState().activeEndpoint);
+else {
+const explicitHost = args[0] === '--host' ? args[1] : undefined;
+if (explicitHost) args = args.slice(2);
+const state = readState();
+const endpoint = explicitHost || process.env.DOCKER_HOST || state.activeEndpoint;
+if (endpoint === 'unix:///tmp/fake-docker.sock' && !state.pinnedEndpointAvailable)
+  fail('pinned Docker endpoint is unavailable', 45);
+if (args[0] === 'info') {
+  if (process.env.FAKE_CHANGE_ACTIVE_CONTEXT_AFTER_INFO === 'true' && !state.pinnedInfoSeen)
+    state.activeEndpoint = 'ssh://changed.example.test';
+  state.pinnedInfoSeen = true;
+  if (process.env.FAKE_LOSE_PINNED_ENDPOINT_AFTER_INFO === 'true')
+    state.pinnedEndpointAvailable = false;
+  writeState(state);
+  process.exit(0);
+} else if (args[0] === 'run') {
   if (process.env.FAKE_DOCKER_RUN_FAIL === 'true') fail('forced docker run failure', 44);
-  writeState({ container: true, volume: true });
+  state.container = true; state.volume = true; writeState(state);
   console.log('fake-container-id');
 } else if (args[0] === 'port') console.log('127.0.0.1:55432');
 else if (args[0] === 'exec') process.exit(0);
@@ -77,6 +97,7 @@ else if (args[0] === 'container' && args[1] === 'rm') {
   else if (kind === 'container') fail('\\nError response from daemon: No such container: ' + args.at(-1));
   else fail('\\nError response from daemon: get ' + args.at(-1) + ': no such volume');
 } else fail('unexpected docker command: ' + args.join(' '), 97);
+}
 `);
 
   const guardedChildPrelude = `
@@ -153,6 +174,11 @@ async function readFakeLog(fake: FakeVerification) {
   try { return await readFile(fake.logPath, 'utf8'); } catch { return ''; }
 }
 
+function dockerOperationLines(log: string) {
+  return log.split('\n').filter((line) => line.startsWith('docker ') &&
+    !line.startsWith('docker context '));
+}
+
 test('repository verification retains its required static workflow boundaries', async () => {
   const [packageJson, script] = await Promise.all([
     readRepositoryFile('package.json'), readRepositoryFile('scripts/verify.sh'),
@@ -168,17 +194,59 @@ test('repository verification retains its required static workflow boundaries', 
   assert.match(script, /npm test/);
 });
 
-test('verification rejects a non-local Docker endpoint before creating resources', async () => {
+for (const endpoint of ['ssh://builder.example.test', 'tcp://builder.example.test:2376']) {
+  test(`verification rejects the remote Docker endpoint ${endpoint} before creating resources`, async () => {
+    const fake = await createFakeVerification();
+    try {
+      const result = fake.run({
+        DOCKER_CONTEXT: 'remote-builder',
+        DOCKER_HOST: 'unix:///tmp/misleading-local.sock',
+        FAKE_DOCKER_ENDPOINT: endpoint,
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(`${result.stdout}\n${result.stderr}`, /local Unix socket/);
+      assert.doesNotMatch(await readFakeLog(fake), /docker (?:--host .* )?run /);
+    } finally { await rm(fake.directory, { recursive: true, force: true }); }
+  });
+}
+
+test('active context changes after validation cannot redirect setup or cleanup', async () => {
   const fake = await createFakeVerification();
   try {
     const result = fake.run({
-      DOCKER_CONTEXT: 'remote-builder',
-      DOCKER_HOST: 'unix:///tmp/misleading-local.sock',
-      FAKE_DOCKER_ENDPOINT: 'ssh://builder.example.test',
+      FAKE_CHANGE_ACTIVE_CONTEXT_AFTER_INFO: 'true',
+      FAKE_NPM_FAIL_COMMAND: 'run typecheck',
+      FAKE_NPM_EXIT: '42',
     });
+    assert.equal(result.status, 42, `${result.stdout}\n${result.stderr}`);
+    const operations = dockerOperationLines(await readFakeLog(fake));
+    assert.ok(operations.length > 0);
+    assert.ok(operations.every((line) =>
+      line.startsWith('docker --host unix:///tmp/fake-docker.sock ')), operations.join('\n'));
+    assert.ok(operations.some((line) => line.includes(' container rm --force ')));
+    assert.ok(operations.some((line) => line.includes(' volume rm ')));
+    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')),
+      {
+        container: false,
+        volume: false,
+        activeEndpoint: 'ssh://changed.example.test',
+        pinnedInfoSeen: true,
+        pinnedEndpointAvailable: true,
+      });
+  } finally { await rm(fake.directory, { recursive: true, force: true }); }
+});
+
+test('loss of the pinned Docker endpoint fails closed', async () => {
+  const fake = await createFakeVerification();
+  try {
+    const result = fake.run({ FAKE_LOSE_PINNED_ENDPOINT_AFTER_INFO: 'true' });
     assert.notEqual(result.status, 0);
-    assert.match(`${result.stdout}\n${result.stderr}`, /local Unix socket/);
-    assert.doesNotMatch(await readFakeLog(fake), /^docker run /m);
+    assert.match(`${result.stdout}\n${result.stderr}`, /pinned Docker endpoint is unavailable/);
+    const log = await readFakeLog(fake);
+    assert.doesNotMatch(log, /migrations\//);
+    assert.doesNotMatch(log, /"command":"npm"/);
+    assert.ok(dockerOperationLines(log).every((line) =>
+      line.startsWith('docker --host unix:///tmp/fake-docker.sock ')));
   } finally { await rm(fake.directory, { recursive: true, force: true }); }
 });
 
@@ -211,8 +279,8 @@ test('hostile dotenv settings cannot replace generated database URLs in verifica
     assert.match(log, /scripts\/check-verification-database\.ts/);
     assert.match(log, /migrations\/001_create_prospects\.sql/);
     assert.match(log, /"command":"npm","args":\["test"\]/);
-    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')),
-      { container: false, volume: false });
+    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')).container, false);
+    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')).volume, false);
   } finally { await rm(fake.directory, { recursive: true, force: true }); }
 });
 
@@ -227,8 +295,8 @@ test('an unowned database is rejected before migrations or tests can run', async
     assert.ok(guardIndex >= 0 && ownershipIndex > guardIndex);
     assert.doesNotMatch(log, /migrations\//);
     assert.doesNotMatch(log, /"command":"npm"/);
-    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')),
-      { container: false, volume: false });
+    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')).container, false);
+    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')).volume, false);
   } finally { await rm(fake.directory, { recursive: true, force: true }); }
 });
 
@@ -237,8 +305,8 @@ test('a forced verification failure still removes its container and volume', asy
   try {
     const result = fake.run({ FAKE_NPM_FAIL_COMMAND: 'run typecheck', FAKE_NPM_EXIT: '42' });
     assert.equal(result.status, 42, `${result.stdout}\n${result.stderr}`);
-    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')),
-      { container: false, volume: false });
+    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')).container, false);
+    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')).volume, false);
   } finally { await rm(fake.directory, { recursive: true, force: true }); }
 });
 
@@ -281,7 +349,28 @@ test('pull-request CI runs the repository verification command with a stable che
   assert.match(workflow, /^    name: verify$/m);
   assert.match(workflow, /^    timeout-minutes: 20$/m);
   assert.match(workflow, /^          ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}$/m);
+  assert.match(workflow, /^          persist-credentials: false$/m);
+  assert.match(workflow, /EXPECTED_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(workflow, /actual_head_sha="\$\(git rev-parse HEAD\)"/);
+  assert.match(workflow, /"\$actual_head_sha" != "\$EXPECTED_HEAD_SHA"/);
+  assert.match(workflow, /GITHUB_STEP_SUMMARY/);
   assert.match(workflow, /run: npm ci/);
   assert.match(workflow, /run: npm run verify/);
   assert.doesNotMatch(workflow, /secrets\./);
+});
+
+test('review guidance derives exact-head evidence from verified PR-head identity', async () => {
+  const [reviewSkill, testingGuide] = await Promise.all([
+    readRepositoryFile('.agents/skills/relay-review/SKILL.md'),
+    readRepositoryFile('docs/Relay_Testing_and_Worker_Guide.md'),
+  ]);
+  for (const guidance of [reviewSkill, testingGuide]) {
+    assert.match(guidance, /synthetic merge commit/i);
+    assert.match(guidance, /neither proves nor disproves/i);
+    assert.match(guidance, /git rev-parse HEAD/);
+    assert.match(guidance, /older pull-request\s+head/i);
+    assert.match(guidance, /newer reviewed fixed point/i);
+  }
+  assert.doesNotMatch(reviewSkill,
+    /only if GitHub reports that check for the exact `HEAD` commit under review/);
 });

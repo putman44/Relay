@@ -13,18 +13,20 @@ done
 
 if [[ -n "${DOCKER_CONTEXT:-}" ]]; then
   docker_context="$DOCKER_CONTEXT"
-  docker_endpoint="$(docker context inspect "$docker_context" --format '{{.Endpoints.docker.Host}}')" || {
+  docker_endpoint="$(env -u DOCKER_CONTEXT -u DOCKER_HOST \
+    docker context inspect "$docker_context" --format '{{.Endpoints.docker.Host}}')" || {
     echo "Relay verification could not inspect the selected Docker context." >&2
     exit 1
   }
 elif [[ -n "${DOCKER_HOST:-}" ]]; then
   docker_endpoint="$DOCKER_HOST"
 else
-  docker_context="$(docker context show)" || {
+  docker_context="$(env -u DOCKER_CONTEXT -u DOCKER_HOST docker context show)" || {
     echo "Relay verification could not determine the active Docker context." >&2
     exit 1
   }
-  docker_endpoint="$(docker context inspect "$docker_context" --format '{{.Endpoints.docker.Host}}')" || {
+  docker_endpoint="$(env -u DOCKER_CONTEXT -u DOCKER_HOST \
+    docker context inspect "$docker_context" --format '{{.Endpoints.docker.Host}}')" || {
     echo "Relay verification could not inspect the active Docker context." >&2
     exit 1
   }
@@ -34,6 +36,10 @@ if [[ ! "$docker_endpoint" == unix:///* ]]; then
   exit 1
 fi
 readonly docker_endpoint
+
+docker_pinned() {
+  env -u DOCKER_CONTEXT -u DOCKER_HOST docker --host "$docker_endpoint" "$@"
+}
 
 resource_id="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
 database_password="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
@@ -65,10 +71,10 @@ remove_resource() {
   local name="$2"
   local output
   if [[ "$kind" == container ]]; then
-    if output="$(docker container rm --force "$name" 2>&1)"; then
+    if output="$(docker_pinned container rm --force "$name" 2>&1)"; then
       return 0
     fi
-  elif output="$(docker volume rm "$name" 2>&1)"; then
+  elif output="$(docker_pinned volume rm "$name" 2>&1)"; then
     return 0
   fi
   if docker_not_found "$kind" "$name" "$output"; then
@@ -87,7 +93,7 @@ verify_resource_absent() {
   else
     format='{{.Name}}'
   fi
-  if output="$(docker "$kind" inspect --format "$format" "$name" 2>&1)"; then
+  if output="$(docker_pinned "$kind" inspect --format "$format" "$name" 2>&1)"; then
     echo "Relay verification could not verify $kind absence; $name still exists." >&2
     return 1
   fi
@@ -105,8 +111,8 @@ cleanup() {
   trap - EXIT INT TERM
   set +e
 
-  if ! docker info >/dev/null 2>&1; then
-    echo "Relay verification could not reach Docker to perform cleanup." >&2
+  if ! docker_pinned info >/dev/null 2>&1; then
+    echo "Relay verification could not reach the pinned Docker endpoint to perform cleanup." >&2
     cleanup_status=1
   fi
   remove_resource container "$container_name" || cleanup_status=1
@@ -127,12 +133,12 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-if ! docker info >/dev/null 2>&1; then
-  echo "Relay verification requires a running local Docker daemon." >&2
+if ! docker_pinned info >/dev/null 2>&1; then
+  echo "Relay verification requires a running daemon at the pinned local Docker endpoint." >&2
   exit 1
 fi
 
-docker run --detach \
+docker_pinned run --detach \
   --name "$container_name" \
   --mount "type=volume,source=${volume_name},target=/var/lib/postgresql/data" \
   --publish 127.0.0.1::5432 \
@@ -141,7 +147,7 @@ docker run --detach \
   --env POSTGRES_PASSWORD="$database_password" \
   "$PGVECTOR_IMAGE" postgres -c "relay.verification_nonce=$ownership_nonce" >/dev/null
 
-port_binding="$(docker port "$container_name" 5432/tcp)"
+port_binding="$(docker_pinned port "$container_name" 5432/tcp)"
 if [[ ! "$port_binding" =~ ^127\.0\.0\.1:([0-9]+)$ ]]; then
   echo "Relay verification refused unexpected PostgreSQL binding: $port_binding" >&2
   exit 1
@@ -151,7 +157,7 @@ readonly database_url="postgresql://${database_user}:${database_password}@127.0.
 
 database_ready=false
 for _ in {1..60}; do
-  if docker exec "$container_name" pg_isready --username "$database_user" --dbname relay_test >/dev/null 2>&1; then
+  if docker_pinned exec "$container_name" pg_isready --username "$database_user" --dbname relay_test >/dev/null 2>&1; then
     database_ready=true
     break
   fi
@@ -159,7 +165,7 @@ for _ in {1..60}; do
 done
 if [[ "$database_ready" != true ]]; then
   echo "Disposable relay_test database did not become ready." >&2
-  docker logs "$container_name" >&2 || true
+  docker_pinned logs "$container_name" >&2 || true
   exit 1
 fi
 
