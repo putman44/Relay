@@ -738,9 +738,17 @@ uniquely named container and volume from the pinned official
 `relay_test`. Concurrent runs do not share a container, volume, port, or
 database state.
 
-The command masks `.env`, explicitly sets `RELAY_TEST_DATABASE_DISPOSABLE=true`
-and both database URLs for every child process, and runs the existing effective-
-target guard before applying all migrations in filename order. It then runs
+Verification accepts Docker only through an absolute local Unix-socket endpoint;
+remote, TCP, and SSH Docker endpoints fail before resource creation. Each run
+uses a unique database role, password, and server ownership nonce. Relay proves
+that nonce through the exact generated host URL before any migration or test
+write, so an unrelated loopback `relay_test` database cannot satisfy the paved
+road accidentally.
+
+The command neutralizes both current dotenv 18 and legacy dotenv configuration,
+explicitly sets `RELAY_TEST_DATABASE_DISPOSABLE=true` and both database URLs for
+every child process, and runs the existing effective-target guard plus the
+ownership proof before applying all migrations in filename order. It then runs
 `npm run typecheck` and the normal `npm test` command, preserving the test
 suite's `--test-concurrency=1` setting. It never requires provider or production
 secrets and must not be used to authorize live provider operations.
@@ -771,8 +779,8 @@ npm test
 Current healthy result:
 
 ```text
-tests 326
-pass 326
+tests 334
+pass 334
 fail 0
 ```
 
