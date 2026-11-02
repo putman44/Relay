@@ -26,12 +26,21 @@ test('Prospect intake input: accepts a strict normalized prospect payload', () =
   });
 });
 
+test('Prospect intake input: accepts an omitted, null or blank website', () => {
+  const requestId = randomUUID();
+  for (const website of [undefined, null, '', '   ']) {
+    const value = parseProspectIntakePayload({ requestId, companyName: 'No Website', website });
+    assert.equal(value.website, null);
+  }
+});
+
 test('Prospect intake input: rejects unsafe URLs, invalid email and unknown fields', () => {
   const requestId = randomUUID();
   assert.throws(() => parseProspectIntakePayload({ requestId, companyName: 'A', website: 'http://devbytaylor.com' }));
   assert.throws(() => parseProspectIntakePayload({ requestId, companyName: 'A', website: 'https://devbytaylor.com',
     contactEmail: 'two@example.com,three@example.com' }));
   assert.throws(() => parseProspectIntakePayload({ requestId, companyName: 'A', website: 'https://devbytaylor.com', surprise: true }));
+  assert.throws(() => parseProspectIntakePayload({ requestId, companyName: 'A', website: 42 }));
 });
 
 test('Prospect intake CLI: requires an input path and explicit confirmation', () => {

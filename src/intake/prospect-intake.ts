@@ -5,7 +5,7 @@ import type { ProspectStage } from '../outreach/types/prospect-stages.js';
 export type ProspectIntakeInput = {
   requestId: string;
   companyName: string;
-  website: string;
+  website: string | null;
   industry: string | null;
   contactName: string | null;
   contactEmail: string | null;
@@ -16,7 +16,7 @@ type ProspectSnapshot = Omit<ProspectIntakeInput, 'requestId'>;
 type IntakeRow = {
   id: string;
   prospect_id: string;
-  identity_key: string;
+  identity_key: string | null;
   input_snapshot: ProspectSnapshot;
 };
 type ProspectRow = { id: string; stage: ProspectStage; website: string | null };
@@ -63,8 +63,8 @@ export function parseProspectIntakePayload(input: unknown): ProspectIntakeInput 
   if (!companyName || /[\x00-\x1f\x7f]/.test(companyName) || Buffer.byteLength(companyName) > 200) {
     throw new Error('companyName must be nonblank, at most 200 UTF-8 bytes, and contain no control characters.');
   }
-  if (typeof value.website !== 'string') throw new Error('website is required.');
-  const website = safeResearchUrl(value.website.trim());
+  const websiteInput = optionalText(value.website, 'website', 2048);
+  const website = websiteInput === null ? null : safeResearchUrl(websiteInput);
   const industry = optionalText(value.industry, 'industry', 120);
   const contactName = optionalText(value.contactName, 'contactName', 160);
   const contactEmailRaw = optionalText(value.contactEmail, 'contactEmail', 254);
@@ -115,10 +115,12 @@ async function existingResult(client: PoolClient, row: IntakeRow): Promise<Prosp
 export async function createProspectFromIntake(input: ProspectIntakeInput, database: Pool): Promise<ProspectIntakeResult> {
   const normalized = parseProspectIntakePayload(input);
   const inputSnapshot = snapshot(normalized);
-  const identityKey = new URL(normalized.website).origin.toLowerCase();
+  const identityKey = normalized.website === null ? null : new URL(normalized.website).origin.toLowerCase();
 
   return transaction(database, async client => {
-    const locks = [`identity:${identityKey}`, `request:${normalized.requestId}`].sort();
+    const locks = [`request:${normalized.requestId}`];
+    if (identityKey !== null) locks.push(`identity:${identityKey}`);
+    locks.sort();
     for (const key of locks) await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [key]);
 
     const byRequest = (await client.query<IntakeRow>(
@@ -131,25 +133,27 @@ export async function createProspectFromIntake(input: ProspectIntakeInput, datab
       return existingResult(client, byRequest);
     }
 
-    const byIdentity = (await client.query<IntakeRow>(
-      'SELECT id, prospect_id, identity_key, input_snapshot FROM prospect_intake_requests WHERE identity_key = $1 FOR UPDATE',
-      [identityKey])).rows[0];
-    if (byIdentity) {
-      if (!sameSnapshot(byIdentity.input_snapshot, inputSnapshot)) {
-        throw new ProspectIntakeConflictError('A prospect intake already exists for this website with different input; inspect before updating it.');
-      }
-      return existingResult(client, byIdentity);
-    }
-
-    const legacy = await client.query<{ id: string; website: string | null }>(
-      'SELECT id, website FROM prospects WHERE website IS NOT NULL');
-    for (const prospect of legacy.rows) {
-      try {
-        if (new URL(prospect.website!).origin.toLowerCase() === identityKey) {
-          throw new ProspectIntakeConflictError('A prospect already exists for this website; inspect it instead of creating another.');
+    if (identityKey !== null) {
+      const byIdentity = (await client.query<IntakeRow>(
+        'SELECT id, prospect_id, identity_key, input_snapshot FROM prospect_intake_requests WHERE identity_key = $1 FOR UPDATE',
+        [identityKey])).rows[0];
+      if (byIdentity) {
+        if (!sameSnapshot(byIdentity.input_snapshot, inputSnapshot)) {
+          throw new ProspectIntakeConflictError('A prospect intake already exists for this website with different input; inspect before updating it.');
         }
-      } catch (error) {
-        if (error instanceof Error && error.message.startsWith('A prospect already exists')) throw error;
+        return existingResult(client, byIdentity);
+      }
+
+      const legacy = await client.query<{ id: string; website: string | null }>(
+        'SELECT id, website FROM prospects WHERE website IS NOT NULL');
+      for (const prospect of legacy.rows) {
+        try {
+          if (new URL(prospect.website!).origin.toLowerCase() === identityKey) {
+            throw new ProspectIntakeConflictError('A prospect already exists for this website; inspect it instead of creating another.');
+          }
+        } catch (error) {
+          if (error instanceof Error && error.message.startsWith('A prospect already exists')) throw error;
+        }
       }
     }
 

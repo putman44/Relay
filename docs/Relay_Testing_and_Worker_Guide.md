@@ -1077,6 +1077,7 @@ identity with different input, fails closed.
 | `tests/web/intake-server.test.ts` | Operator intake UI: server-generated request ID, review before creation, explicit confirmation, validation, conflict, and unknown-outcome pages without leaked input or internal errors, HTML escaping, loopback Host/Origin enforcement, body-size and form limits, and loopback-only binding |
 | `tests/web/intake-pages.test.ts` | HTML escaping and a content security policy that allows only the inline stylesheet |
 | `tests/web/intake-ui-boundary.test.ts` | The intake UI process imports no provider modules |
+| `tests/data/canonical-data-foundation.test.ts` | Migration 014, research document/chunk persistence, relational constraints, null-only embeddings until a dimension is selected, and inbound/outbound communication persistence |
 
 The database-backed intake test uses fake/local inputs and a unique schema on
 the guarded disposable `relay_test` database. It does not call any external

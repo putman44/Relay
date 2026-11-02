@@ -38,8 +38,11 @@ or the droplet.
 
 `npm run prospect:add` accepts an explicitly confirmed private JSON input and
 creates a `researching` prospect together with its intake journal row in one
-transaction. The normalized website origin is the existing intake identity;
-this work does not change or expand that canonicalization policy.
+transaction. When a website is supplied, its normalized origin remains the
+intake identity and retains the existing duplicate protection. When no website
+is supplied, the journal stores a null identity and the durable request ID is
+the only idempotency key; a different request ID cannot be inferred to represent
+the same business. Intake does not create a research request or call a provider.
 
 An identical repeat of the same request is idempotent. An identical submission
 for an already journaled identity, including one carrying a new request ID,
@@ -49,6 +52,14 @@ on one prospect and one durable journal row. The unused caller-supplied request
 ID is not persisted. Reusing a request ID for different input, or submitting
 different input for an existing identity, fails closed for inspection rather
 than updating or duplicating the prospect.
+
+Migration 014 makes the intake identity nullable and adds the Phase 1 canonical
+data foundation: `research_documents`, `research_chunks`, and `communications`.
+Research documents are bound to the same prospect as their durable research
+request, chunks are bound to the same prospect as their source document, and
+communications support inbound and outbound email records. The migration
+installs pgvector, but the embedding column has a null-only constraint until a
+later migration explicitly selects an embedding model and vector dimension.
 
 ```bash
 npm run prospect:add -- --input /absolute/path/to/private-prospect.json --confirm-create-prospect
