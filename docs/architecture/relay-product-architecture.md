@@ -146,8 +146,8 @@ id
 prospect_id
 research_request_id
 source_url
-page_type
-title
+page_type (homepage, about, services, contact, team, faq, case_study, blog, other)
+title (optional)
 content
 scraped_at
 created_at
@@ -188,6 +188,12 @@ source_url
 chunk_index
 created_at
 ```
+
+Phase 1 installs pgvector and creates the `embedding` column, but intentionally
+requires it to remain `NULL`. Relay has not selected an embedding model, so its
+dimension is not yet known. A later migration must select and document the model
+and dimension, change the column to `vector(<dimension>)`, and remove the
+temporary null-only constraint before embedding generation or retrieval begins.
 
 The embedding allows Relay to perform semantic searches across business research.
 
@@ -407,15 +413,15 @@ communications
 
 id
 prospect_id
-direction
-channel
+direction (inbound or outbound)
+channel (email in Phase 1)
 gmail_message_id
 gmail_thread_id
 subject
 body
 sent_at
 received_at
-status
+status (sent or received, consistent with direction)
 created_at
 ```
 

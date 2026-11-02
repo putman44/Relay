@@ -47,6 +47,18 @@ test('Prospect intake: durable creation, idempotency and duplicate protection', 
     assert.equal(journal.prospect_id, result.prospectId);
   });
 
+  await t.test('creates a prospect without a website and does not create a research request', async () => {
+    const input = { ...base(), requestId: randomUUID(), companyName: 'No Website Fixture', website: null };
+    const result = await createProspectFromIntake(input, database);
+    const prospect = (await database.query('SELECT * FROM prospects WHERE id = $1', [result.prospectId])).rows[0];
+    const journal = (await database.query('SELECT * FROM prospect_intake_requests WHERE id = $1', [input.requestId])).rows[0];
+    assert.equal(result.created, true);
+    assert.equal(prospect.website, null);
+    assert.equal(journal.identity_key, null);
+    assert.equal((await database.query('SELECT count(*) FROM prospect_research_requests WHERE prospect_id = $1',
+      [result.prospectId])).rows[0].count, '0');
+  });
+
   await t.test('same request and same site are idempotent without resetting stage', async () => {
     const input = { ...base(), website: 'https://idempotent-intake.com/' };
     const first = await createProspectFromIntake(input, database);
@@ -75,7 +87,7 @@ test('Prospect intake: durable creation, idempotency and duplicate protection', 
     assert.equal((await database.query('SELECT count(*) FROM prospects WHERE website = $1',
       [input.website])).rows[0].count, '1');
     assert.equal((await database.query('SELECT count(*) FROM prospect_intake_requests WHERE identity_key = $1',
-      [new URL(input.website).origin.toLowerCase()])).rows[0].count, '1');
+      [new URL(input.website!).origin.toLowerCase()])).rows[0].count, '1');
   });
 
   await t.test('concurrent identical submissions with different request IDs converge on one durable result', async () => {
@@ -92,7 +104,7 @@ test('Prospect intake: durable creation, idempotency and duplicate protection', 
     assert.equal((await database.query('SELECT count(*) FROM prospects WHERE website = $1',
       [firstInput.website])).rows[0].count, '1');
     assert.equal((await database.query('SELECT count(*) FROM prospect_intake_requests WHERE identity_key = $1',
-      [new URL(firstInput.website).origin.toLowerCase()])).rows[0].count, '1');
+      [new URL(firstInput.website!).origin.toLowerCase()])).rows[0].count, '1');
   });
 
   await t.test('same request with changed input and same website with changed input both fail closed', async () => {

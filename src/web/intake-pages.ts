@@ -8,7 +8,7 @@ type ProspectField = Exclude<IntakeField, 'requestId'>;
 // Labels only: prospect intake owns every validation rule, so the form adds no client-side constraints.
 const FIELDS: Record<ProspectField, { label: string; required?: true; multiline?: true; inputMode?: 'url' | 'email' }> = {
   companyName: { label: 'Company name', required: true },
-  website: { label: 'Website', required: true, inputMode: 'url' },
+  website: { label: 'Website', inputMode: 'url' },
   industry: { label: 'Industry' },
   contactName: { label: 'Contact name' },
   contactEmail: { label: 'Contact email', inputMode: 'email' },

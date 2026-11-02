@@ -24,11 +24,13 @@
 
 ## 2. Prospect Intake and Research
 
-Apply migrations 012 and 013 through the reviewed migration process before using
-the completed intake and stored-policy paths. Migration 012 creates the durable
-prospect intake journal. Migration 013 adds
+Apply migrations 012, 013, and 014 through the reviewed migration process before
+using the completed intake and stored-policy paths. Migration 012 creates the
+durable prospect intake journal. Migration 013 adds
 `gmail_draft_allowed BOOLEAN NOT NULL DEFAULT false`, so existing and defaulted
-research rows are conservatively Gmail-disabled.
+research rows are conservatively Gmail-disabled. Migration 014 makes website
+optional for prospect intake; it is required before submitting an intake without
+a website.
 
 ### Intake
 
@@ -36,11 +38,15 @@ research rows are conservatively Gmail-disabled.
 npm run prospect:add -- --input /absolute/path/to/private-prospect.json --confirm-create-prospect
 ```
 
-Successful identical submissions converge on one prospect and one durable
-journal row. The result returns the authoritative persisted journal request ID,
-which may differ from a duplicate caller's proposed request ID. A request-ID or
-identity conflict with different input fails closed and requires inspection; do
-not change the ID or input merely to bypass the conflict.
+For prospects with a website, successful identical submissions converge by the
+website business identity on one prospect and one durable journal row. The
+result returns the authoritative persisted journal request ID, which may differ
+from a duplicate caller's proposed request ID. For prospects without a website,
+only an identical retry using the same request ID is idempotent; a different
+request ID is treated as a distinct intake because Relay cannot infer the same
+business identity. A request-ID or website-identity conflict with different
+input fails closed and requires inspection; do not change the ID or input merely
+to bypass the conflict.
 
 ### Operator intake UI
 

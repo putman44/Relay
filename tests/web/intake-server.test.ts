@@ -251,6 +251,16 @@ test("Intake UI: review shows normalized values and carries the same request ID 
   assert.equal(harness.calls.length, 0);
 });
 
+test("Intake UI: review and creation accept a prospect without a website", async (t) => {
+  const harness = await startHarness(t);
+  const review = await post(harness, "/review", { ...rawFields, website: "" });
+  assert.equal(review.status, 200);
+  assert.ok(review.body.includes('<span class="empty">Not provided</span>'));
+  const reply = await post(harness, "/prospects", confirmed(hiddenFields(review.body)));
+  assert.equal(reply.status, 201);
+  assert.equal(harness.calls[0]?.website, null);
+});
+
 test("Intake UI: confirming the review creates through intake with the preserved request ID", async (t) => {
   const harness = await startHarness(t);
   const review = await post(harness, "/review", rawFields);

@@ -1062,12 +1062,14 @@ No live flag, scheduler, deployment, or Gmail operation was enabled by this work
 
 ## Prospect intake migration
 
-Migration 012 creates `prospect_intake_requests`, the durable one-row-per-
-prospect and one-row-per-identity intake journal. Identical retries return the
-persisted journal request ID, including when the duplicate supplied a different
-unused request ID. Concurrent identical submissions converge on one prospect
-and one journal row. Reusing a request ID with different input, or reusing an
-identity with different input, fails closed.
+Migrations 012 and 014 provide `prospect_intake_requests`, the durable one-row-
+per-prospect intake journal; migration 014 makes the website identity nullable.
+For prospects with a website, identical submissions converge by website
+business identity on one prospect and one journal row, including when the
+duplicate supplied a different unused request ID. For prospects without a
+website, only the request ID provides idempotency, so a different request ID is
+treated as a distinct intake. Reusing a request ID with different input, or
+reusing a non-null website identity with different input, fails closed.
 
 | Test | What it protects |
 | --- | --- |
@@ -1077,6 +1079,7 @@ identity with different input, fails closed.
 | `tests/web/intake-server.test.ts` | Operator intake UI: server-generated request ID, review before creation, explicit confirmation, validation, conflict, and unknown-outcome pages without leaked input or internal errors, HTML escaping, loopback Host/Origin enforcement, body-size and form limits, and loopback-only binding |
 | `tests/web/intake-pages.test.ts` | HTML escaping and a content security policy that allows only the inline stylesheet |
 | `tests/web/intake-ui-boundary.test.ts` | The intake UI process imports no provider modules |
+| `tests/data/canonical-data-foundation.test.ts` | Migration 014, research document/chunk persistence, prospect and source-URL relational constraints, null-only embeddings until a dimension is selected, and inbound/outbound communication persistence |
 
 The database-backed intake test uses fake/local inputs and a unique schema on
 the guarded disposable `relay_test` database. It does not call any external

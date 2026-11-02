@@ -111,3 +111,25 @@ test("Prospect intake conflicts: database failures are not reported as conflicts
     },
   );
 });
+
+test("Prospect intake without a website uses request identity and skips website duplicate checks", async () => {
+  const value = { ...input(), website: null };
+  const prospectId = randomUUID();
+  const { pool, statements } = scriptedPool((sql) =>
+    sql.includes("INSERT INTO prospects")
+      ? [{ id: prospectId, stage: "researching", website: null }]
+      : [],
+  );
+
+  const result = await createProspectFromIntake(value, pool);
+
+  assert.deepEqual(result, {
+    requestId: value.requestId,
+    prospectId,
+    stage: "researching",
+    created: true,
+  });
+  assert.ok(statements.includes("COMMIT"));
+  assert.ok(!statements.some((sql) => sql.includes("WHERE identity_key = $1")));
+  assert.ok(!statements.some((sql) => sql.includes("WHERE website IS NOT NULL")));
+});
