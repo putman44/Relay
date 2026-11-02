@@ -31,7 +31,7 @@ journal. Migration 013 adds `gmail_draft_allowed BOOLEAN NOT NULL DEFAULT false`
 to each research request. Apply each migration through the reviewed migration
 process before using its corresponding command. Migrations 007-011 were applied
 to the development Neon database on October 16, 2026; this documentation change
-does not claim that migrations 012-013 were applied to development, production,
+does not claim that migrations 012-014 were applied to development, production,
 or the droplet.
 
 ### Durable prospect intake
