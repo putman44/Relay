@@ -21,7 +21,7 @@ CREATE TABLE research_documents (
   scraped_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (research_request_id, source_url),
-  UNIQUE (id, prospect_id),
+  UNIQUE (id, prospect_id, source_url),
   FOREIGN KEY (prospect_id, research_request_id)
     REFERENCES prospect_research_requests(prospect_id, id) ON DELETE CASCADE
 );
@@ -39,8 +39,8 @@ CREATE TABLE research_chunks (
   chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (research_document_id, chunk_index),
-  FOREIGN KEY (research_document_id, prospect_id)
-    REFERENCES research_documents(id, prospect_id) ON DELETE CASCADE,
+  FOREIGN KEY (research_document_id, prospect_id, source_url)
+    REFERENCES research_documents(id, prospect_id, source_url) ON DELETE CASCADE,
   CONSTRAINT research_chunks_embedding_model_not_selected CHECK (embedding IS NULL)
 );
 

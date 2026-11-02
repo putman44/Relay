@@ -83,6 +83,12 @@ test('Canonical data foundation: persistence and relational constraints', async 
       chunkIndex: 1,
     }, database));
     await assert.rejects(database.query(`INSERT INTO research_chunks (
+      prospect_id, research_document_id, content, source_url, chunk_index
+    ) VALUES ($1,$2,$3,$4,$5)`, [
+      prospectId, documentId, 'Wrong source URL.',
+      'https://canonical-data-fixture.com/contact', 1,
+    ]));
+    await assert.rejects(database.query(`INSERT INTO research_chunks (
       prospect_id, research_document_id, content, embedding, source_url, chunk_index
     ) VALUES ($1,$2,$3,$4,$5,$6)`, [
       prospectId, documentId, 'Premature embedding.', '[1,2,3]',
