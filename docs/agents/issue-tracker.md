@@ -18,8 +18,12 @@ When a skill says to fetch the relevant ticket, read it as above and state its t
 ## Intended workflow
 
 1. A human writes or approves an issue that states the scope and acceptance criteria for a change.
-2. The user invokes `relay-implement` with that issue as the approved scope.
-3. The user invokes `relay-review` separately against a fixed point, and it reads the same issue as the originating scope.
+2. The user may invoke `relay-plan` to produce read-only, repository-aware implementation guidance.
+3. The issue remains the authoritative scope; the plan does not replace it.
+4. The user invokes `relay-implement` with that issue as the approved scope.
+5. The user invokes `relay-review` independently against a fixed point, and it reads the same issue as the originating scope.
+
+The implementer and reviewer inspect the issue and current repository evidence themselves; neither role depends on trusting planner conclusions.
 
 The issue body is the approved scope. Comments that change scope count only when the user confirms them.
 

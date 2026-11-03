@@ -1,0 +1,6 @@
+interface:
+  display_name: "Relay Plan"
+  short_description: "Plan approved Relay issues read-only."
+
+policy:
+  allow_implicit_invocation: false
