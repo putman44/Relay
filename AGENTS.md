@@ -80,6 +80,9 @@ Canonical skill definitions live in `.agents/skills/`. `.claude/skills/` holds r
 - Route read-only issue-driven planning work to `relay-plan`.
 - Route implementation work to `relay-implement`.
 - Route independent review work to `relay-review`. An implementing agent does not review its own work.
+- Route end-to-end coordination of one explicitly identified issue to `relay-orchestrate`. The orchestrator dispatches the other three roles, owns authorized branch/commit/push/PR mutations, validates exact-head CI, and stops for Taylor's final merge decision.
+
+The role boundaries are fixed: `relay-plan` produces a readiness decision and advisory guidance; `relay-implement` changes the worktree; `relay-review` independently evaluates a committed fixed point; `relay-orchestrate` coordinates the handoffs and authorized engineering-workflow mutations. No role silently absorbs another role's authority.
 
 ### `relay-implement` limits
 
@@ -92,5 +95,9 @@ Canonical skill definitions live in `.agents/skills/`. `.claude/skills/` holds r
 - Commit, push, create or merge pull requests, or mutate GitHub state. These remain human or orchestrator responsibilities.
 
 Database-writing tests under `relay-implement` still require explicit approval and may run only against the guarded local disposable `relay_test` environment. The sole exception is `npm run verify`, which owns and destroys its isolated Docker database and may be run without separate database-write approval.
+
+### `relay-orchestrate` limits
+
+`relay-orchestrate` may create its deterministic issue branch, fixed implementation commit, push, and pull request only as part of its explicitly invoked workflow and only after its documented gates pass. It may not implement or review in place of the dispatched roles. It never merges, enables auto-merge, deploys, selects issues autonomously, runs remediation loops, weakens exact-head evidence, or performs live/production product operations.
 
 Relay skills are explicit workflows. Run one only when the user invokes it; never select one implicitly. Codex enforces this with `policy.allow_implicit_invocation: false` in each skill's `agents/openai.yaml`, and Claude Code with `disable-model-invocation: true` in each `SKILL.md` frontmatter. If a request fits a Relay skill that the user did not invoke, name the skill so the user can invoke it.
