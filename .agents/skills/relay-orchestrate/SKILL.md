@@ -21,15 +21,19 @@ Follow `AGENTS.md`, `docs/agents/issue-tracker.md`, and the safety boundaries of
 
 ## Canonical GitHub repository identity
 
-Repository identity is immutable recorded orchestration state, not ambient CLI context:
+Repository identity is immutable recorded orchestration state, not ambient CLI context. Establish it in this order before the first GitHub provider operation:
 
-1. While resolving the issue, run `gh repo view --json nameWithOwner,url` once from the clean starting clone. Require one well-formed `nameWithOwner` and canonical repository URL whose host and owner/name agree. Record the exact `nameWithOwner` as `<canonical-repository>` and the URL host as `<canonical-host>`.
-2. Resolve the issue with `gh issue view <issue-number> --repo <canonical-repository> --json number,title,state,body,labels,comments`. Require the returned issue number to equal the requested canonical base-10 number.
-3. Record `<canonical-repository>` with the issue number, issue body, base SHA, issue branch, and reviewed HEAD in the recorded orchestration state. Never replace or re-infer it later.
-4. Give the planner, implementer, and reviewer the same canonical repository identity. Require any GitHub read they perform to use that identity explicitly.
-5. Bind every later `gh` GitHub read or write to `--repo <canonical-repository>`. If `gh api` is needed, use only an endpoint rooted at `/repos/<canonical-repository>/...` and bind the request to `<canonical-host>` explicitly. Never rely on current-directory, remote, or default-host inference after the initial identity capture.
+1. From the clean starting clone on `main`, resolve local `main` and its configured upstream remote without changing refs.
+2. Read exactly one configured fetch URL and exactly one configured push URL for that upstream remote. Parse only unambiguous HTTPS, `ssh://`, or SCP-style GitHub URLs. After removing at most one terminal `.git`, require the fetch URL and push URL to agree on one candidate host and one candidate owner/repository. STOP on multiple URLs, URL rewriting that cannot be inspected, a local/file URL, disagreement, or any ambiguous form.
+3. Record the agreed candidate host as `<canonical-host>`, the agreed owner/repository as `<canonical-repository>`, and the exact host-qualified repository selector `<canonical-host>/<canonical-repository>` as `<canonical-gh-repository>`. Neither component may be copied from `GH_HOST`, `GH_REPO`, the current directory, a later provider response, or any default CLI context.
+4. Prove that the installed GitHub CLI honors that explicit selector despite a conflicting ambient `GH_HOST`. For this read-only compatibility probe only, shadow `GH_HOST` with a known non-canonical sentinel and run `gh repo view <canonical-gh-repository> --json nameWithOwner,url`. Require exactly one well-formed response whose `nameWithOwner` equals `<canonical-repository>` and whose canonical URL host and owner/repository equal the recorded values. If the host-qualified selector is unsupported, the command targets the sentinel host, or the result is missing, malformed, ambiguous, or mismatched, STOP before any GitHub mutation.
+5. Resolve the issue with `gh issue view <issue-number> --repo <canonical-gh-repository> --json number,title,state,body,labels,comments`. Require the returned issue number to equal the requested canonical base-10 number.
+6. Record `<canonical-host>`, `<canonical-repository>`, and `<canonical-gh-repository>` with the issue number, issue body, base SHA, issue branch, and reviewed HEAD in the orchestration state. Never replace or re-infer any part later.
+7. Give the planner, implementer, and reviewer the same canonical host and repository identity. Require any GitHub read they perform to use that identity explicitly.
 
-Every Git transport operation must also use the recorded upstream remote only after its fetch and push URLs have been proven to identify `<canonical-repository>` as specified below. If the repository identity, host, URL mapping, issue identity, or explicit binding cannot be proven, STOP before mutation. On any later repository identity mismatch or inability to prove repository identity, STOP immediately.
+Bind every later standard `gh` GitHub read or write to `--repo <canonical-gh-repository>`. This includes issue, PR, workflow run, check, and commit status operations. For `gh api`, require both `--hostname <canonical-host>` and an explicit repository-rooted endpoint of the form `repos/<canonical-repository>/...`. Never use `{owner}` or `{repo}` placeholders, current-directory or remote inference, `GH_REPO`, ambient `GH_HOST`, or default-host inference. A conflicting ambient `GH_HOST` must not change the host-qualified repository selector; if the recorded host cannot be targeted explicitly, STOP.
+
+Every Git transport operation must use the recorded upstream remote only after its fetch and push URLs have been proven to identify the recorded canonical host and repository. If the repository identity, host, URL mapping, issue identity, or explicit binding cannot be proven, STOP before mutation. On any later repository identity mismatch or inability to prove repository identity, STOP immediately.
 
 ## Role policy and dispatch
 
@@ -60,11 +64,12 @@ Complete every check before creating or changing a branch, file, commit, or remo
 1. Run `git status --short --branch` and require an entirely clean worktree: no staged, unstaged, or untracked paths.
 2. Require the current branch to be `main`.
 3. Resolve local `main` and its configured upstream. Extract and record the upstream remote name without changing refs.
-4. Read that remote's configured fetch URLs with `git remote get-url --all <upstream-remote>` and configured push URLs with `git remote get-url --push --all <upstream-remote>`. Require exactly one well-formed fetch URL and exactly one well-formed push URL. Parse only an unambiguous HTTPS, `ssh://`, or SCP-style GitHub URL; require its host to equal `<canonical-host>` and its owner/repository path, after removing at most one terminal `.git`, to equal `<canonical-repository>`. This proves the configured upstream fetch URL and push URL correspond to the canonical repository identity. STOP on multiple URLs, URL rewriting that cannot be inspected, a local/file URL, another host or repository, or any ambiguous form.
-5. Query the live remote tip with exactly `git ls-remote --exit-code <upstream-remote> refs/heads/main`. Treat a missing ref, multiple result lines, malformed output, or command failure as ambiguous and STOP.
-6. Require local `main`, its configured upstream, and the single live remote `main` SHA returned by that non-mutating query to be identical.
-7. Record that exact commit as the base SHA.
-8. Confirm the issue, canonical repository identity, and role-policy checks above are complete.
+4. Establish the canonical GitHub identity from the configured upstream fetch URL and push URL, run the host-conflict compatibility probe, and resolve the issue in the exact order required by the canonical identity contract. These are the first GitHub provider operations.
+5. Re-read that remote's configured fetch URLs with `git remote get-url --all <upstream-remote>` and configured push URLs with `git remote get-url --push --all <upstream-remote>`. Require exactly one well-formed fetch URL and exactly one well-formed push URL. Apply the canonical identity URL rules again and require both to identify `<canonical-host>` and `<canonical-repository>` exactly.
+6. Query the live remote tip with exactly `git ls-remote --exit-code <upstream-remote> refs/heads/main`. Treat a missing ref, multiple result lines, malformed output, or command failure as ambiguous and STOP.
+7. Require local `main`, its configured upstream, and the single live remote `main` SHA returned by that non-mutating query to be identical.
+8. Record that exact commit as the base SHA.
+9. Confirm the issue, canonical repository identity, and role-policy checks above are complete.
 
 If a check is unavailable or ambiguous, STOP. Never clean, reset, stash, discard, overwrite, reformat, or otherwise alter human-owned work to make preflight pass.
 
@@ -74,7 +79,7 @@ Preflight and planning must remain non-mutating until all preceding gates pass. 
 
 Dispatch a fresh planner context using the configured planner role. Give it the same issue number and explicitly invoke `relay-plan` for the same issue.
 
-Supply `<canonical-repository>` as recorded orchestration state and require every planner GitHub read to bind to it explicitly. A planner-reported repository identity mismatch is a STOP condition.
+Supply `<canonical-host>`, `<canonical-repository>`, and `<canonical-gh-repository>` as recorded orchestration state and require every planner GitHub read to bind to them explicitly. A planner-reported repository identity mismatch is a STOP condition.
 
 Require a complete structured plan whose plan status is exactly `READY` and whose human-decisions section contains no unresolved material human decision. STOP on `BLOCKED`, malformed or missing output, unreadable scope, unresolved material human decisions, or a conflict with Relay safety rules.
 
@@ -137,7 +142,7 @@ Before dispatch, derive and record an exact expected changed-path allowlist from
 Dispatch a fresh implementer context using the configured implementer role. Invoke `relay-implement` for the same issue and supply:
 
 - The issue number and authoritative issue body.
-- The recorded canonical repository identity, with an instruction to bind every GitHub read to it explicitly.
+- The recorded canonical host and repository identity, with an instruction to bind every GitHub read to them explicitly.
 - The planner output, clearly labeled advisory.
 - The recorded base SHA and issue branch.
 - The expected changed-path allowlist.
@@ -188,7 +193,7 @@ STOP if staging includes an unexpected path, commit identity is unavailable, the
 Dispatch a fresh independent reviewer context using the configured reviewer role. Do not inherit planner or implementer context. Provide:
 
 - The originating issue as authoritative scope.
-- The recorded canonical repository identity, with an instruction to bind every GitHub read to it explicitly.
+- The recorded canonical host and repository identity, with an instruction to bind every GitHub read to them explicitly.
 - The exact recorded base SHA and implementation HEAD SHA as the fixed point.
 - Repository instructions and access needed for a read-only `relay-review` run.
 
@@ -221,19 +226,20 @@ Any movement must STOP and requires a new independent review initiated by Taylor
 Only after fixed-point revalidation:
 
 1. Push the exact reviewed commit with this create-only, expected-absence lease and no other refspec: `git push --force-with-lease=refs/heads/<issue-branch>: <upstream-remote> <reviewed-head>:refs/heads/<issue-branch>`. The empty expected object after the lease's final colon is the expected-absence guard: the command must fail if the remote issue branch exists, so the guard cannot advance or overwrite an unexpectedly created remote branch. This is not permission to force-update any existing ref.
-2. Open one pull request with `gh pr create --repo <canonical-repository> --base main --head <canonical-repository-owner>:<issue-branch> ...`. The explicit base repository and same-repository head owner are mandatory.
-3. Include exactly `Closes #<issue-number>` in the PR body. Because the PR is explicitly created in `<canonical-repository>` and its base repository is validated below, this shorthand refers to the issue in that same canonical repository. Do not use an unverified issue reference from another repository.
-4. Query the resulting PR with `gh pr view <pr-number> --repo <canonical-repository> --json number,url,baseRepository,baseRefName,headRepository,headRefName,headRefOid`.
-5. Require the PR's base repository identity to equal `<canonical-repository>`, base ref to equal `main`, head repository identity to equal `<canonical-repository>`, head ref to equal the recorded issue branch, and head SHA to equal the reviewed HEAD.
-6. Record and report the PR number and URL.
+2. Open one pull request targeting `main` with `gh pr create --repo <canonical-gh-repository> --base main --head <canonical-repository-owner>:<issue-branch> ...`. The host-qualified base repository and same-repository head owner are mandatory.
+3. Include exactly `Closes #<issue-number>` in the PR body. Because the PR is explicitly created in `<canonical-repository>` on `<canonical-host>` and its base repository is validated below, this shorthand refers to the issue in that same canonical repository. Do not use an unverified issue reference from another repository.
+4. From the successful create output, require exactly one canonical PR URL of the form `https://<canonical-host>/<canonical-repository>/pull/<pr-number>`, with one canonical base-10 `<pr-number>`. Record both as the expected PR URL and PR number. STOP if the output is missing, malformed, ambiguous, or identifies another host, repository, or number.
+5. Fetch the complete repository-rooted REST response with exactly `gh api --hostname <canonical-host> repos/<canonical-repository>/pulls/<pr-number>`. Parse the response as one JSON object and require the fields `number`, `html_url`, `base.repo.full_name`, `base.ref`, `head.repo.full_name`, `head.ref`, and `head.sha` to exist with the expected scalar types.
+6. Require the returned PR number to equal the recorded PR number; PR URL to equal the recorded PR URL; base repository identity to equal `<canonical-repository>`; base ref to equal `main`; head repository identity to equal `<canonical-repository>`; head ref to equal the recorded issue branch; and head SHA to equal the independently reviewed HEAD. The exact PR URL must also prove `<canonical-host>` and `<canonical-repository>`.
+7. Record and report the verified PR number and PR URL.
 
-STOP if the expected-absence lease rejects the push, the remote tip is ambiguous, the PR cannot be created, any base or head repository identity or ref mismatches, or the PR head differs from the reviewed HEAD. Never force-update an existing remote ref or accept another commit under the existing review result.
+Missing, malformed, ambiguous, wrong-host, wrong-repository, wrong-branch, or wrong-SHA PR evidence is a STOP condition before any further mutation or CI acceptance. Also STOP if the expected-absence lease rejects the push, the remote tip is ambiguous, or the PR cannot be created. Never force-update an existing remote ref or accept another commit under the existing review result.
 
 ## State 10: exact-head CI gate
 
 Observe the required GitHub check named `verify`. Track pending or in-progress separately from terminal states. A check counts as green only when all existing exact-head rules in `docs/Relay_Testing_and_Worker_Guide.md` are proven:
 
-Every PR, workflow-run, check, or commit-status query in this state must use `--repo <canonical-repository>` (or the explicitly repository-rooted API form from the identity contract). Revalidate the PR's base repository identity, base ref, head repository identity, head ref, and head SHA on every PR refresh; STOP on any mismatch.
+Every standard `gh` PR, workflow run, check, or commit status query in this state must use `--repo <canonical-gh-repository>`. Every API query must use `--hostname <canonical-host>` and a literal `repos/<canonical-repository>/...` endpoint. Every PR refresh must repeat the host-bound REST PR verification from State 9, including exact PR number and URL, base repository and ref, head repository and ref, and head SHA; STOP on any mismatch, missing field, malformed response, or ambiguity.
 
 1. The PR's current head equals the reviewed HEAD.
 2. The workflow run corresponds to that PR revision and workflow revision.
