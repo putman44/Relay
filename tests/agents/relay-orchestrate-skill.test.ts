@@ -91,11 +91,19 @@ test('relay-orchestrate binds every GitHub operation to one recorded repository 
   assert.match(skill, /recorded orchestration state/i);
   assert.match(
     skill,
-    /`gh issue view <issue-number> --repo <canonical-repository>/,
+    /fetch URL.*push URL.*agree.*candidate.*host.*repository.*before.*GitHub provider operation/is,
   );
   assert.match(
     skill,
-    /every later.*GitHub.*read.*write.*`--repo <canonical-repository>`/is,
+    /`gh repo view <canonical-gh-repository> --json nameWithOwner,url`/,
+  );
+  assert.match(
+    skill,
+    /`gh issue view <issue-number> --repo <canonical-gh-repository>/,
+  );
+  assert.match(
+    skill,
+    /every later.*standard `gh`.*read.*write.*`--repo <canonical-gh-repository>`/is,
   );
   assert.match(
     skill,
@@ -115,6 +123,63 @@ test('relay-orchestrate binds every GitHub operation to one recorded repository 
     /`Closes #<issue-number>`.*same canonical repository/is,
   );
   assert.match(skill, /repository identity.*cannot be proven.*STOP/is);
+});
+
+test('relay-orchestrate uses host-bound REST PR verification and fails closed on bad evidence', async () => {
+  const skill = await readRepositoryFile('.agents/skills/relay-orchestrate/SKILL.md');
+
+  assert.doesNotMatch(skill, /baseRepository/);
+  assert.match(
+    skill,
+    /`gh api --hostname <canonical-host> repos\/<canonical-repository>\/pulls\/<pr-number>`/,
+  );
+  assert.match(
+    skill,
+    /`number`.*`html_url`.*`base\.repo\.full_name`.*`base\.ref`.*`head\.repo\.full_name`.*`head\.ref`.*`head\.sha`/is,
+  );
+  assert.match(
+    skill,
+    /PR number.*PR URL.*base repository.*base ref.*head repository.*head ref.*head SHA/is,
+  );
+  assert.match(
+    skill,
+    /returned PR number.*recorded PR number.*PR URL.*recorded PR URL/is,
+  );
+  assert.match(
+    skill,
+    /base repository identity.*<canonical-repository>.*base ref.*`main`/is,
+  );
+  assert.match(
+    skill,
+    /head repository identity.*<canonical-repository>.*head ref.*recorded issue branch/is,
+  );
+  assert.match(skill, /head SHA.*independently reviewed HEAD/is);
+  assert.match(
+    skill,
+    /Missing, malformed, ambiguous, wrong-host, wrong-repository, wrong-branch, or wrong-SHA PR evidence is a STOP condition/,
+  );
+  assert.match(skill, /`--hostname <canonical-host>`/);
+  assert.match(skill, /`repos\/<canonical-repository>\/\.\.\.`/);
+  assert.match(
+    skill,
+    /never.*`\{owner\}`.*`\{repo\}`.*current-directory.*remote.*`GH_REPO`.*default-host inference/is,
+  );
+  assert.match(
+    skill,
+    /conflicting.*`GH_HOST`.*host-qualified.*selector.*STOP/is,
+  );
+  assert.match(
+    skill,
+    /shadow `GH_HOST`.*non-canonical sentinel.*`gh repo view <canonical-gh-repository>/is,
+  );
+  assert.match(
+    skill,
+    /issue.*PR.*workflow run.*check.*commit status.*`--repo <canonical-gh-repository>`/is,
+  );
+  assert.match(
+    skill,
+    /every PR refresh.*host-bound REST PR verification/is,
+  );
 });
 
 test('relay-orchestrate preserves role boundaries and ordered handoffs', async () => {
