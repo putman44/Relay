@@ -77,6 +77,7 @@ Treat every pre-existing uncommitted change, whether staged, unstaged, or untrac
 
 Canonical skill definitions live in `.agents/skills/`. `.claude/skills/` holds relative symlinks to them for Claude Code; do not copy or duplicate `SKILL.md` files.
 
+- Route read-only issue-driven planning work to `relay-plan`.
 - Route implementation work to `relay-implement`.
 - Route independent review work to `relay-review`. An implementing agent does not review its own work.
 
