@@ -31,6 +31,13 @@ Before planning:
 
 Repository evidence overrides remembered behavior or generic engineering preferences. Stop inspection when every proposed implementation and verification step has concrete repository support.
 
+## Protect sensitive data
+
+- Do not read local secret-bearing files such as `.env`, credential files, tokens, private keys, or similar ignored local configuration.
+- Prefer checked-in configuration examples, source code, documentation, and other non-secret repository evidence.
+- Redact secrets, credentials, PII, and other sensitive values immediately if they appear during otherwise permitted inspection, and continue permitted read-only inspection only with sanitized evidence.
+- Planner output must not include secret values or reproduce other sensitive values. Use a placeholder such as `[REDACTED]` when the existence of a value is relevant to the plan.
+
 ## Keep planning read-only
 
 Use only safe, read-only inspection commands. Never:
