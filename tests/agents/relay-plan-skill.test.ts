@@ -54,6 +54,18 @@ test('relay-plan keeps the issue authoritative and has the required output contr
   assert.match(skill, /`READY` or `BLOCKED`/);
 });
 
+test('relay-plan avoids secret-bearing local files and redacts sensitive output', async () => {
+  const skill = await readRepositoryFile('.agents/skills/relay-plan/SKILL.md');
+
+  assert.match(skill, /do not read.*\.env/i);
+  assert.match(skill, /credential files.*tokens.*private keys/i);
+  assert.match(skill, /ignored.*local configuration/i);
+  assert.match(skill, /checked-in configuration examples.*source code.*documentation/i);
+  assert.match(skill, /redact.*secrets.*credentials.*PII.*sensitive values/i);
+  assert.match(skill, /planner output.*must not include.*secret values/i);
+  assert.match(skill, /continue.*read-only inspection/i);
+});
+
 test('relay-plan is read-only and leaves implementation and review as separate roles', async () => {
   const [skill, agents, issueTracker] = await Promise.all([
     readRepositoryFile('.agents/skills/relay-plan/SKILL.md'),
