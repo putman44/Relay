@@ -158,6 +158,98 @@ When review uncovers previously unidentified dependencies or risks, the orchestr
 
 ## 4. Functional Requirements
 
+These requirements define observable orchestration behavior. They describe the proposed system, not functionality already implemented. Each requirement should be validated with deterministic tests and, where appropriate, controlled integration scenarios. Recovery must continue to honor the authorization and independent-review policies defined in Section 3 and Appendix A.
+
+### 4.1 Checkpoint and Repository Recovery
+
+#### FR-001 — Safe Checkpoint Reconciliation
+
+When an interrupted engineering run resumes, the orchestrator must reconcile its persisted checkpoint with the actual local repository, authorized GitHub repository and branch, commit history, approved requirements version, and recorded verification evidence before authorizing further work.
+
+It must identify missing, stale, or conflicting state; preserve unexpected changes; and must not automatically reset a branch or overwrite unexpected remote commits.
+
+**Verification scenario:** A checkpoint references verified commit `abc123`, but the issue branch points to `def456`. The orchestrator detects the mismatch and does not dispatch additional work or overwrite the branch before reconciliation.
+
+#### FR-002 — Unexpected Commit Impact Assessment
+
+When repository state differs from the saved checkpoint, the orchestrator must determine whether the unexpected changes affect approved requirements, completed tasks, task dependencies, or the validity of existing tests and reviews. It may request planner-led investigation when necessary.
+
+Demonstrably unaffected work may be preserved under approved recovery policy. Affected work must be revalidated; uncertain or unauthorized changes must not be silently accepted, discarded, or overwritten. Change size or filename alone is not sufficient proof that a change is safe.
+
+**Verification scenario:** An unexpected commit modifies code used by a verified task. The orchestrator records the impact and prevents reuse of affected approval evidence until revalidation.
+
+### 4.2 Verification and Test Environment Recovery
+
+#### FR-003 — Selective Test Recovery
+
+After an interruption, the orchestrator must distinguish checks that passed, failed, or did not complete. A passing result may be reused only when its commit identity, applicable requirements version, test configuration, execution environment, and relevant dependencies remain valid.
+
+Incomplete or invalidated checks must be rerun. Confirmed failures require diagnosis rather than being treated as interruptions. Broader suites must still run when engineering policy requires them, including applicable final integration and CI verification.
+
+**Verification scenario:** Two independently isolated checks have trustworthy passing evidence and a third was interrupted. With unchanged inputs and environment, Relay reruns the third check without unnecessarily repeating the first two.
+
+#### FR-004 — Safe Test Environment Recovery
+
+If an interruption may have changed shared test state, the orchestrator must establish the target environment's identity, isolation guarantees, and permitted recovery operations before using existing results or rerunning tests.
+
+Where shared state may be contaminated, recovery must use an authorized, known-clean state and rerun affected checks. Destructive reset or database operations require the applicable safety authorization and preflight checks. If environmental identity or authorization cannot be established, database recovery and affected verification must remain blocked.
+
+**Verification scenario:** A test modifies a shared database before a crash. Relay does not rerun tests or reset the database until it verifies that the target is the authorized disposable test environment.
+
+### 4.3 Task Dispatch and Review Recovery
+
+#### FR-005 — Dependency-Gated Task Dispatch
+
+The orchestrator must not dispatch an implementation assignment until all of its required dependencies have been independently verified and the task's scope, requirements, and environment authorizations are valid. These conditions must be checked again immediately before dispatch.
+
+Task handoffs may be prepared and saved in advance, but preparing a handoff does not authorize the implementer to act.
+
+**Verification scenario:** Task B depends on Task A. While A lacks verified approval, Relay may store B's proposed handoff but must not launch B's implementer.
+
+#### FR-006 — Interrupted Review Recovery
+
+A review counts as completed only after a full structured reviewer result has been received, validated, bound to the applicable execution and commit identities, and durably recorded.
+
+If a reviewer is interrupted without such a result, the orchestrator must retain verified implementation and publication evidence, record the interrupted attempt, and—after rechecking the commit, requirements, and applicable evidence—launch a fresh independent review of that commit. Partial review artifacts cannot authorize advancement.
+
+**Verification scenario:** Codex closes during review after a verified commit was safely pushed. On restart, Relay records the interrupted review, preserves implementation work, and starts another review rather than rerunning implementation or treating the partial review as passed.
+
+### 4.4 Git Publication and Evidence History
+
+#### FR-007 — Idempotent Git Publication Recovery
+
+Before retrying an interrupted push, the orchestrator must query the designated remote repository and branch to verify whether the expected commit is already present at the required branch state.
+
+If publication is already confirmed, Relay must record the outcome without blindly pushing again. If the remote branch head differs, Relay must inspect ancestry, relevant changes, authorization, and verification evidence before reconciling. It must not force-push, reset, or overwrite unexpected remote history.
+
+**Verification scenario:** A push succeeds but Relay crashes before checkpointing. On restart, the orchestrator recognizes the expected remote commit and records publication as complete without creating another commit or changing the branch.
+
+#### FR-008 — Historical Evidence Preservation and Commit-Specific Review
+
+When an implementation changes after review, the orchestrator must preserve previous review attempts, outcomes, and supporting evidence as historical records while distinguishing them from current approval evidence.
+
+Approval for an older commit must not automatically transfer to a newer commit. The orchestrator must reassess affected verification and obtain independent review applicable to the current commit before marking the task verified. Historical outcomes may contribute to model-performance analysis but do not by themselves constitute controlled benchmark results or current approval.
+
+**Verification scenario:** Commit `abc123` passed review; a subsequent `def456` changes implementation code. Relay retains the earlier review for history, but does not mark `def456` verified without applicable new review.
+
+### 4.5 Idempotent External Operations
+
+#### FR-009 — Idempotent External Actions
+
+Before any authorized external side effect that could be duplicated on retry—for example, creating a GitHub issue, pull request, or comment—the orchestrator must durably record a stable operation identifier, intended target, authorization, and pending action.
+
+Where the external service permits it, Relay should include a recognizable operation marker in the created resource. Recovery must inspect external state and verify a matching result before retrying. Ambiguous outcomes must not cause blind repetition; if safe reconciliation is not possible, the action remains blocked for human input.
+
+**Verification scenario:** Relay creates an authorized GitHub sub-issue but crashes before recording its number. Recovery searches for the operation marker and does not create an apparent duplicate.
+
+#### FR-010 — External Action Outcome Reconciliation
+
+When an external operation completed but its success was not durably recorded, the orchestrator must independently verify the matching external resource, its target repository or branch where relevant, and the original authorization, then update the checkpoint to reflect the completed action without replaying it.
+
+If the outcome cannot be established unambiguously, the orchestrator must preserve the uncertain operation state and prevent unsafe retries.
+
+**Verification scenario:** The local record says `IN_PROGRESS`, but GitHub shows exactly one correctly authorized issue carrying the matching operation marker. Relay records the returned issue identity and marks the action completed without creating another issue.
+
 ## 5. Reliability and Safety Requirements
 
 ## 6. Model Routing and Cost Optimization
