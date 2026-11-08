@@ -70,11 +70,8 @@ function checkpointContinuity(before: RunCheckpoint, after: RunCheckpoint): Chec
   if (!same(before.taskGraph, after.taskGraph)) return continuityError("taskGraph changed; this store cannot authorize graph replacement");
   if (!prefix(before.authorizationEvidenceReferences, after.authorizationEvidenceReferences))
     return continuityError("authorizationEvidenceReferences removed or rewritten");
-  const oldExecutions = new Map(before.executionRecords.map((record) => [record.recordId, record]));
-  for (const [id, record] of oldExecutions) {
-    if (!same(record, after.executionRecords.find((item) => item.recordId === id)))
-      return continuityError(`executionRecords[${id}] removed or rewritten`);
-  }
+  if (!prefix(before.executionRecords, after.executionRecords))
+    return continuityError("executionRecords must retain existing records at their original positions; new records may only be appended");
   for (const oldRecord of before.taskRecords) {
     const next = after.taskRecords.find((item) => item.taskId === oldRecord.taskId);
     if (!next) return continuityError(`taskRecords[${oldRecord.taskId}] removed`);

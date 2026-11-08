@@ -360,6 +360,48 @@ test("rejects history loss and substitution before replacing a verified checkpoi
   }
 });
 
+test("execution records retain their positions and accept only appended records", async (t) => {
+  const directory = await tempDirectory(t);
+  const store = new FileCheckpointStore(directory);
+  const original = verifiedCheckpoint();
+  assert.deepEqual(await store.save(original), { status: "SAVED", revision: 1 });
+  const path = join(directory, "run-1.json");
+  const bytes = await readFile(path);
+  const added = {
+    recordId: "execution-plan-2",
+    role: "planner" as const,
+    identity: { ...plannerIdentity, attemptId: "plan-2" },
+    evidenceReferences: ["plan-record-2"],
+  };
+  const [plan, implementer, reviewer] = original.executionRecords;
+  assert.ok(plan && implementer && reviewer);
+  const cases = [
+    ["swapped implementer and reviewer", [plan, reviewer, implementer]],
+    ["inserted before existing records", [added, ...original.executionRecords]],
+    ["inserted between existing records", [plan, implementer, added, reviewer]],
+    ["removed an existing record", [plan, reviewer]],
+    ["rewrote an existing record", [plan, implementer, { ...reviewer, evidenceReferences: ["replacement"] }]],
+  ] as const;
+  for (const [name, executionRecords] of cases) {
+    const result = await store.save({ ...original, revision: 2, executionRecords });
+    assert.equal(result.status, "ERROR", name);
+    if (result.status === "ERROR") {
+      assert.equal(result.error.code, "CONTINUITY_VIOLATION", name);
+      assert.match(result.error.detail, /executionRecords.*append|executionRecords.*position/i, name);
+    }
+    assert.deepEqual(await readFile(path), bytes, name);
+    const restored = await store.load(original.runId);
+    assert.equal(restored.status, "RESTORED", name);
+    if (restored.status === "RESTORED") assert.deepEqual(restored.checkpoint, original, name);
+  }
+
+  const appended = { ...original, revision: 2, executionRecords: [...original.executionRecords, added] };
+  assert.deepEqual(await store.save(appended), { status: "SAVED", revision: 2 });
+  const restored = await store.load(original.runId);
+  assert.equal(restored.status, "RESTORED");
+  if (restored.status === "RESTORED") assert.deepEqual(restored.checkpoint, appended);
+});
+
 test("preserves block and recovery history while permitting structurally valid recovery", async (t) => {
   const store = new FileCheckpointStore(await tempDirectory(t));
   let state = advance(createPendingTask(), "IMPLEMENTING", "DISPATCH_APPROVED");
