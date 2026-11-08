@@ -103,10 +103,18 @@ export function recoverTask(
   if (task.reasons.some((item) => item.code === "BLOCKER_UNRESOLVED")) {
     return result("BLOCKER_ACTIVE", task.earliestStage, task.reasons);
   }
-  // A failed or missing prerequisite requires investigation; RESUME must not clear the blocker.
-  if (task.reusableStages.length !== record.state.completedStages.length ||
-      task.reasons.some((item) => item.code !== "SEPARATE_RESUME_REQUIRED")) {
+  // Only a bound, explicitly invalid stage may be superseded. Missing or conflicting proof holds.
+  const invalidStages = task.reasons.filter((item) => item.code === "STAGE_EVIDENCE_INVALID");
+  if (task.reasons.some((item) => item.code !== "SEPARATE_RESUME_REQUIRED" &&
+      item.code !== "STAGE_EVIDENCE_INVALID") ||
+      (invalidStages.length === 0 && task.reusableStages.length !== record.state.completedStages.length)) {
     return result("REVALIDATION_REQUIRED", task.earliestStage, task.reasons);
+  }
+  // Repeating implementation after a recorded commit needs history this checkpoint cannot represent.
+  if (invalidStages.some((item) => item.stage === "IMPLEMENTING" ||
+      (item.stage === "PENDING" && record.recordedCommitSha !== undefined))) {
+    return result("REVALIDATION_REQUIRED", task.earliestStage,
+      [reason("REPLACEMENT_COMMIT_REQUIRED", "Implementation recovery requires separately scoped commit history")]);
   }
   if (!trusted) {
     return result("REVALIDATION_REQUIRED", task.earliestStage,
@@ -169,7 +177,7 @@ export function recoverTask(
       !revalidations.every((item, index) => {
         const completion = record.state.completedStages[index];
         const observed = current.completedStageEvidence.find((evidence) => evidence.stage === item.stage);
-        return completion?.stage === item.stage && item.valid === true && observed?.valid === true &&
+        return completion?.stage === item.stage && item.valid === observed?.valid &&
           nonempty(item.evidenceReferences) && sameReferences(item.evidenceReferences, observed.evidenceReferences);
       })) {
     return result("REVALIDATION_REQUIRED", task.earliestStage,

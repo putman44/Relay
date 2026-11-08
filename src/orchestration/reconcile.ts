@@ -122,7 +122,6 @@ function stageReason(
 ): ReconciliationReason | null {
   const stage = completion.stage;
   if (!evidence) return { code: "STAGE_EVIDENCE_MISSING", detail: "Current stage evidence is missing", taskId, stage };
-  if (!evidence.valid) return { code: "STAGE_EVIDENCE_INVALID", detail: "Current assessment invalidates this stage", taskId, stage };
   if (evidence.decision !== completion.decision ||
       !sameReferences(evidence.recordedEvidenceReferences, completion.evidenceReferences)) {
     return { code: "STAGE_EVIDENCE_INCONSISTENT", detail: "Current evidence does not identify the recorded stage decision", taskId, stage };
@@ -139,6 +138,7 @@ function stageReason(
   if (stage === "PENDING" ? evidence.commitSha !== undefined : evidence.commitSha !== recordedCommitSha) {
     return { code: "COMMIT_EVIDENCE_MISMATCH", detail: "Stage evidence is bound to a different commit", taskId, stage };
   }
+  if (!evidence.valid) return { code: "STAGE_EVIDENCE_INVALID", detail: "Current assessment invalidates this stage", taskId, stage };
   return null;
 }
 
@@ -170,29 +170,25 @@ function reconcileTask(
   const reusableStages: CompletedStage[] = [];
   const reasons: ReconciliationReason[] = [];
   for (const completion of completed) {
+    let commitReason: ReconciliationReason | null = null;
     if (completion.stage === "IMPLEMENTING") {
       const proof = observation.verifiedCommitEvidence;
       if (!proof) {
-        reasons.push({ code: "COMMIT_EVIDENCE_MISSING", detail: "Current verified commit evidence is missing", taskId, stage: completion.stage });
-        break;
-      }
-      if (proof.commitSha !== record.recordedCommitSha) {
-        reasons.push({ code: "COMMIT_EVIDENCE_MISMATCH", detail: "Current verified commit differs from the recorded task commit", taskId, stage: completion.stage });
-        break;
-      }
-      if (!executionMatches(checkpoint, taskId, proof.executionRecordId, proof.identity,
+        commitReason = { code: "COMMIT_EVIDENCE_MISSING", detail: "Current verified commit evidence is missing", taskId, stage: completion.stage };
+      } else if (proof.commitSha !== record.recordedCommitSha) {
+        commitReason = { code: "COMMIT_EVIDENCE_MISMATCH", detail: "Current verified commit differs from the recorded task commit", taskId, stage: completion.stage };
+      } else if (!executionMatches(checkpoint, taskId, proof.executionRecordId, proof.identity,
           "implementer", requirementsVersion, proof.commitSha)) {
-        reasons.push({ code: "EXECUTION_IDENTITY_MISMATCH", detail: "Verified commit evidence belongs to a different execution", taskId, stage: completion.stage });
-        break;
+        commitReason = { code: "EXECUTION_IDENTITY_MISMATCH", detail: "Verified commit evidence belongs to a different execution", taskId, stage: completion.stage };
       }
     }
-    const reason = stageReason(checkpoint, taskId, completion, evidenceByStage.get(completion.stage),
+    const reason = commitReason ?? stageReason(checkpoint, taskId, completion, evidenceByStage.get(completion.stage),
       requirementsVersion, record.recordedCommitSha, observation.verifiedCommitEvidence);
     if (reason) {
       reasons.push(reason);
-      break;
+    } else if (reasons.length === 0) {
+      reusableStages.push(completion.stage);
     }
-    reusableStages.push(completion.stage);
   }
 
   const earliestStage: TaskStage | null = reusableStages.length < completed.length

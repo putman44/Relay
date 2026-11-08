@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { recoverTask, type TrustedTaskRecoveryEvidence } from "../../src/orchestration/recovery.js";
+import { FileCheckpointStore } from "../../src/orchestration/checkpoint-store.js";
 import type { RunCheckpoint } from "../../src/orchestration/checkpoint.js";
 import type { TrustedCurrentObservations } from "../../src/orchestration/reconcile.js";
 import { applyTaskTransition, createPendingTask, type StageDecisionKind, type TaskStage, type TaskState } from "../../src/orchestration/state.js";
@@ -193,14 +197,134 @@ test("stale repository or requirements evidence stops recovery", () => {
   }
 });
 
-test("invalidated completed stages never clear a blocker", () => {
+test("explicitly invalid verification or publication resumes at first invalid stage with prefix and history intact", () => {
+  for (const firstInvalid of [2, 3]) {
+    const { checkpoint, observations, trusted } = fixture();
+    const before = structuredClone(checkpoint);
+    const stage = checkpoint.taskRecords[0]!.state.completedStages[firstInvalid]!.stage;
+    observations.tasks["task-a"]!.completedStageEvidence[firstInvalid]!.valid = false;
+    trusted.decision.stageRevalidations[firstInvalid]!.valid = false;
+    const result = recoverTask(checkpoint, observations, "task-a", trusted);
+    assert.equal(result.decision, "RESUME_ELIGIBLE");
+    assert.equal(result.nextStage, stage);
+    assert.equal(result.authorizesDispatch, false);
+    assert.deepEqual(result.state?.completedStages, before.taskRecords[0]!.state.completedStages.slice(0, firstInvalid));
+    assert.deepEqual(result.state?.invalidatedStages, before.taskRecords[0]!.state.completedStages.slice(firstInvalid));
+    assert.deepEqual(result.state?.blockHistory, before.taskRecords[0]!.state.blockHistory);
+    assert.equal(result.state?.recoveryHistory.at(-1)?.stageRevalidations[firstInvalid]?.valid, false);
+    assert.deepEqual(checkpoint, before);
+  }
+});
+
+test("invalid dispatch resumes before any commit, without granting dispatch", () => {
+  const { checkpoint, observations, trusted } = fixture();
+  const advanced = applyTaskTransition(createPendingTask(), { type: "ADVANCE", to: "IMPLEMENTING",
+    decision: { kind: "DISPATCH_APPROVED", evidenceReferences: ["recorded-DISPATCH_APPROVED"] } });
+  assert.equal(advanced.applied, true);
+  if (!advanced.applied) return;
+  const blocked = applyTaskTransition(advanced.state, { type: "BLOCK",
+    reason: { code: "EVIDENCE", detail: "Dispatch evidence invalidated" },
+    evidenceReferences: ["recorded-block"], authorizedNextAction: "Revalidate dispatch" });
+  assert.equal(blocked.applied, true);
+  if (!blocked.applied) return;
+  checkpoint.taskRecords = [{ taskId: "task-a", state: blocked.state }];
+  checkpoint.executionRecords = checkpoint.executionRecords.filter((item) => item.role === "implementer")
+    .map((item) => ({ ...item, commitSha: undefined }));
+  observations.tasks["task-a"]!.verifiedCommitEvidence = undefined;
+  observations.tasks["task-a"]!.completedStageEvidence = observations.tasks["task-a"]!.completedStageEvidence.slice(0, 1);
+  observations.tasks["task-a"]!.completedStageEvidence[0]!.valid = false;
+  delete trusted.commitSha;
+  trusted.decision.stageRevalidations = [{ stage: "PENDING", valid: false,
+    evidenceReferences: ["current-task-a-PENDING"] }];
+  const result = recoverTask(checkpoint, observations, "task-a", trusted);
+  assert.equal(result.decision, "RESUME_ELIGIBLE");
+  assert.equal(result.state?.status, "PENDING");
+  assert.equal(result.state?.completedStages.length, 0);
+  assert.equal(result.state?.invalidatedStages[0]?.stage, "PENDING");
+  assert.equal(result.authorizesDispatch, false);
+});
+
+test("invalid dispatch or implementation with a recorded commit holds for replacement commit history", () => {
+  for (const firstInvalid of [0, 1]) {
+    const { checkpoint, observations, trusted } = fixture();
+    observations.tasks["task-a"]!.completedStageEvidence[firstInvalid]!.valid = false;
+    trusted.decision.stageRevalidations[firstInvalid]!.valid = false;
+    const result = recoverTask(checkpoint, observations, "task-a", trusted);
+    assert.equal(result.decision, "REVALIDATION_REQUIRED");
+    assert.equal(result.state, undefined);
+    assert.equal(result.authorizesDispatch, false);
+  }
+});
+
+test("missing, contradictory, or unassessed evidence cannot supersede a stage", () => {
   const { checkpoint, observations, trusted } = fixture();
   observations.tasks["task-a"]!.completedStageEvidence[2]!.valid = false;
-  const result = recoverTask(checkpoint, observations, "task-a", trusted);
-  assert.equal(result.decision, "REVALIDATION_REQUIRED");
-  assert.equal(result.nextStage, "VERIFYING");
-  assert.equal(result.state, undefined);
-  assert.equal(checkpoint.taskRecords[0]?.state.status, "BLOCKED");
+  trusted.decision.stageRevalidations[2]!.valid = false;
+  const cases = [
+    (current: TrustedCurrentObservations) => { current.tasks["task-a"]!.completedStageEvidence.splice(2, 1); },
+    (current: TrustedCurrentObservations) => { current.tasks["task-a"]!.completedStageEvidence[2]!.decision = "REVIEW_PASSED"; },
+    (current: TrustedCurrentObservations) => { current.tasks["task-a"]!.completedStageEvidence[2]!.executionRecordId = "review-task-a"; },
+    (current: TrustedCurrentObservations) => { current.tasks["task-a"]!.completedStageEvidence[2]!.valid = true; },
+  ];
+  for (const change of cases) {
+    const current = structuredClone(observations);
+    change(current);
+    assert.equal(recoverTask(checkpoint, current, "task-a", trusted).state, undefined);
+  }
+  const unassessed = structuredClone(trusted);
+  unassessed.decision = { ...unassessed.decision,
+    stageRevalidations: unassessed.decision.stageRevalidations.filter((_, index) => index !== 2) };
+  assert.equal(recoverTask(checkpoint, observations, "task-a", unassessed).state, undefined);
+});
+
+test("invalidated-stage recovery holds on stale blocker, changed context, or unauthorized prerequisites", () => {
+  const changes: ((checkpoint: RunCheckpoint, current: TrustedCurrentObservations,
+    proof: TrustedTaskRecoveryEvidence) => void)[] = [
+    (_, __, proof) => { proof.blockIndex = 1; },
+    (_, __, proof) => { proof.executionIdentity = identity("task-a", "attempt-2"); },
+    (_, current) => { current.tasks["task-a"]!.blockerResolved = false; },
+    (_, current) => { current.tasks["task-a"]!.dependenciesValid = false; },
+    (_, current) => { current.tasks["task-a"]!.environmentAuthorized = false; },
+    (_, current) => { current.authorizedRequirementsVersion = "requirements-v2"; },
+    (_, current) => { current.repository.observedHeadSha = other; },
+  ];
+  for (const change of changes) {
+    const { checkpoint, observations, trusted } = fixture();
+    observations.tasks["task-a"]!.completedStageEvidence[2]!.valid = false;
+    trusted.decision.stageRevalidations[2]!.valid = false;
+    change(checkpoint, observations, trusted);
+    const result = recoverTask(checkpoint, observations, "task-a", trusted);
+    assert.equal(result.state, undefined);
+    assert.equal(result.authorizesDispatch, false);
+  }
+});
+
+test("invalidated-stage recovery survives checkpoint save and restore without dispatch authority", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "relay-invalidated-recovery-"));
+  try {
+    const store = new FileCheckpointStore(directory);
+    const { checkpoint, observations, trusted } = fixture();
+    assert.equal((await store.save(checkpoint)).status, "SAVED");
+    observations.tasks["task-a"]!.completedStageEvidence[2]!.valid = false;
+    trusted.decision.stageRevalidations[2]!.valid = false;
+    const recovery = recoverTask(checkpoint, observations, "task-a", trusted);
+    assert.equal(recovery.decision, "RESUME_ELIGIBLE");
+    const updated: RunCheckpoint = { ...checkpoint, revision: 2,
+      taskRecords: [{ ...checkpoint.taskRecords[0]!, state: recovery.state! }] };
+    assert.equal((await store.save(updated)).status, "SAVED");
+    const restored = await store.load(checkpoint.runId);
+    assert.equal(restored.status, "RESTORED");
+    if (restored.status !== "RESTORED") return;
+    assert.equal(restored.requiresReconciliation, true);
+    assert.deepEqual(restored.checkpoint.taskRecords[0]!.state.invalidatedStages,
+      checkpoint.taskRecords[0]!.state.completedStages.slice(2));
+    assert.deepEqual(restored.checkpoint.taskRecords[0]!.state.blockHistory,
+      checkpoint.taskRecords[0]!.state.blockHistory);
+    assert.equal(restored.checkpoint.taskRecords[0]!.recordedCommitSha, head);
+    assert.equal(recoverTask(restored.checkpoint, observations, "task-a").authorizesDispatch, false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("wrong task, run, work item, attempt, commit, and blocker proof are rejected", () => {
