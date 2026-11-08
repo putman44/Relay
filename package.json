@@ -27,7 +27,8 @@
     "dotenv": "^18.0.2",
     "googleapis": "^183.0.0",
     "pg": "^8.23.0",
-    "postal-mime": "4.0.7"
+    "postal-mime": "4.0.7",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
