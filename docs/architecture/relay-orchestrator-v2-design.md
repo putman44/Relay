@@ -250,6 +250,34 @@ If the outcome cannot be established unambiguously, the orchestrator must preser
 
 **Verification scenario:** The local record says `IN_PROGRESS`, but GitHub shows exactly one correctly authorized issue carrying the matching operation marker. Relay records the returned issue identity and marks the action completed without creating another issue.
 
+### 4.6 Task Blocking and Recovery
+
+#### FR-011 — Structured Task Blocking and Recovery
+
+The orchestrator must use a limited set of task states and structured blocking reasons rather than introducing a distinct state for each failure condition.
+
+A blocked task must retain its last valid execution stage, verified work, evidence references, the blocking reason, and the authorized next recovery action. The orchestrator must distinguish transient or otherwise recoverable failures from conditions requiring clarification or human authorization, apply bounded retry limits, and avoid silently repeating failed actions.
+
+A `BLOCKED` task does not necessarily mean the entire GitHub issue or engineering run is terminally blocked. Any continuation must satisfy the existing dependency and safety policies.
+
+**Verification scenario:** GitHub is unavailable after an implementation passes commit, scope, and test checks. Relay records `BLOCKED` with a publication-related reason and retry action while preserving the verified commit; it does not restart implementation.
+
+#### FR-012 — Automatic Development Service Recovery
+
+The orchestrator may automatically start or restart approved local development or test services when it can verify the intended service identity, configuration, environment, and permitted recovery command.
+
+After starting a service, Relay must confirm service health and revalidate the connection target and relevant environment safeguards before resuming interrupted checks. Starting a service does not authorize destructive database operations, resetting persistent data, or accessing an unknown or production environment; those actions remain subject to their separate safety and approval rules.
+
+**Verification scenario:** An approved local PostgreSQL test service is stopped, producing a connection-refused error. Relay confirms the configured service and permitted command, starts it, checks health and test database identity, and retries the interrupted verification without asking for routine manual intervention.
+
+#### FR-013 — State-Aware Task Recovery
+
+When a task becomes blocked, the orchestrator must preserve its completed stages and the evidence supporting them. Once the blocking condition is resolved, Relay must verify the current requirements, repository state, dependency status, and relevant evidence before resuming from the earliest incomplete or invalid stage.
+
+Previously completed implementation, tests, publication, and review must not be repeated unnecessarily; however, affected stages must be redone whenever their evidence is no longer valid or a mandatory engineering policy requires revalidation.
+
+**Verification scenario:** A verified commit cannot be pushed because GitHub is temporarily unavailable. After connectivity returns, Relay reconciles the branch state and, if earlier checks remain valid, resumes publication rather than launching another implementer.
+
 ## 5. Reliability and Safety Requirements
 
 ## 6. Model Routing and Cost Optimization
