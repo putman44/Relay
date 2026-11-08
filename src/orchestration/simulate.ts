@@ -23,6 +23,7 @@ import {
 } from "./state.js";
 
 export interface InjectedResponse {
+  /** Attempt assigned by the simulation harness, independent of the response value. */
   attemptId: string;
   value: unknown;
 }
@@ -50,16 +51,21 @@ export interface SimulatedReviewBlock {
   authorizedNextAction: string;
 }
 
-export interface SimulatedVerifiedTaskEvidence extends TrustedVerificationEvidence {
+export interface SimulatedImplementerBlock {
   identity: ExecutionIdentity;
-  commitSha: string;
+  reason: BlockingReason;
+  evidenceReferences: readonly string[];
+  authorizedNextAction: string;
 }
+
+export type SimulatedVerifiedTaskEvidence = TrustedVerificationEvidence;
 
 export interface SimulatedTaskInput {
   implementer: InjectedResponse;
   reviewer: InjectedResponse;
   commit?: SimulatedCommitSnapshot;
   gates: Partial<Record<StageDecisionKind, SimulatedGate>>;
+  implementerBlock?: SimulatedImplementerBlock;
   reviewBlock?: SimulatedReviewBlock;
   verifiedTaskEvidence?: SimulatedVerifiedTaskEvidence;
 }
@@ -84,7 +90,8 @@ export type SimulationFailureCode =
   | "TRUSTED_GATE_MISMATCH"
   | "IMPLEMENTER_SCHEMA_INVALID"
   | "IMPLEMENTER_CONTEXT_MISMATCH"
-  | "IMPLEMENTER_BLOCKED"
+  | "IMPLEMENTER_BLOCK_DECISION_MISSING"
+  | "IMPLEMENTER_BLOCK_DECISION_MISMATCH"
   | "COMMIT_EVIDENCE_MISSING"
   | "COMMIT_EVIDENCE_MISMATCH"
   | "IMPLEMENTER_REPORTED_INCOMPLETE"
@@ -109,12 +116,24 @@ const hasReferences = (references: readonly string[] | undefined): boolean =>
   Array.isArray(references) && references.length > 0 &&
   references.every((reference) => typeof reference === "string" && reference.trim().length > 0);
 
-const sameIdentity = (actual: ExecutionIdentity, expected: ExecutionIdentity): boolean =>
-  actual.schemaVersion === expected.schemaVersion &&
-  actual.runId === expected.runId &&
-  actual.taskId === expected.taskId &&
-  actual.attemptId === expected.attemptId &&
-  actual.requirementsVersion === expected.requirementsVersion;
+const blockingReasonCodes: readonly string[] = [
+  "DEPENDENCY", "REQUIREMENTS", "ENVIRONMENT", "EVIDENCE",
+  "EXTERNAL_ACTION", "REVIEW", "SAFETY",
+];
+
+const validBlockText = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.trim() === value;
+
+const sameIdentity = (actual: unknown, expected: ExecutionIdentity): boolean => {
+  if (!actual || typeof actual !== "object" || Array.isArray(actual)) return false;
+  const identity = actual as Partial<ExecutionIdentity>;
+  return Object.keys(identity).length === 5 &&
+    identity.schemaVersion === expected.schemaVersion &&
+    identity.runId === expected.runId &&
+    identity.taskId === expected.taskId &&
+    identity.attemptId === expected.attemptId &&
+    identity.requirementsVersion === expected.requirementsVersion;
+};
 
 const sameFiles = (actual: readonly string[], expected: readonly string[]): boolean =>
   actual.length > 0 && actual.length === expected.length &&
@@ -147,9 +166,13 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
     ...input.authorization,
     // Every planned task starts PENDING; historical proof cannot preauthorize it.
     verifiedTaskEvidence: {},
+    expectedVerifiedCommitByTask: {},
+    expectedVerifiedIdentityByTask: {},
   };
   const remaining = new Set(plannedTasks.map((task) => task.taskId));
   const rootIdentity = input.planner.context;
+  authorization.currentRunId = rootIdentity.runId;
+  let taskBlocked = false;
 
   const advance = (taskId: string, event: TaskEvent): SimulationResult | null => {
     const transition = applyTaskTransition(states[taskId]!, event);
@@ -224,7 +247,29 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
           expectedRole: "implementer",
         });
         if (!blockedContext.valid) return stop("IMPLEMENTER_CONTEXT_MISMATCH", blockedContext.errors.join("; "), task.taskId);
-        return stop("IMPLEMENTER_BLOCKED", implementer.reason, task.taskId);
+        const block = taskInput.implementerBlock;
+        if (!block) return stop("IMPLEMENTER_BLOCK_DECISION_MISSING", "Trusted implementer block decision is missing", task.taskId);
+        if (!sameIdentity(block.identity, implementerIdentity) ||
+            !block.reason || typeof block.reason !== "object" ||
+            Array.isArray(block.reason) || Object.keys(block.reason).length !== 2 ||
+            !blockingReasonCodes.includes(block.reason?.code) ||
+            !validBlockText(block.reason?.detail) ||
+            !hasReferences(block.evidenceReferences) ||
+            !block.evidenceReferences.every(validBlockText) ||
+            !validBlockText(block.authorizedNextAction)) {
+          return stop("IMPLEMENTER_BLOCK_DECISION_MISMATCH", "Trusted implementer block decision is stale or incomplete", task.taskId);
+        }
+        const failure = advance(task.taskId, {
+          type: "BLOCK",
+          reason: block.reason,
+          evidenceReferences: block.evidenceReferences,
+          authorizedNextAction: block.authorizedNextAction,
+        });
+        if (failure) return failure;
+        remaining.delete(task.taskId);
+        taskBlocked = true;
+        progressed = true;
+        continue;
       }
       const commit = taskInput.commit;
       if (!commit) return stop("COMMIT_EVIDENCE_MISSING", "Trusted commit snapshot is missing", task.taskId);
@@ -277,7 +322,11 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
           authorizedNextAction: block.authorizedNextAction,
         });
         if (failure) return failure;
-        return { status: "BLOCKED", states, trace };
+        authorization.currentRepositoryCommitSha = commit.commitSha;
+        remaining.delete(task.taskId);
+        taskBlocked = true;
+        progressed = true;
+        continue;
       }
 
       if (reviewer.coverage.verificationChecks.some((evidence) => evidence.result !== "PASSED")) {
@@ -296,14 +345,28 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
       authorization.verifiedTaskEvidence = {
         ...authorization.verifiedTaskEvidence,
         [task.taskId]: {
+          identity: { ...proof.identity },
           requirementsVersion: proof.requirementsVersion,
+          commitSha: proof.commitSha,
           evidenceReferences: proof.evidenceReferences,
         },
       };
+      authorization.expectedVerifiedCommitByTask = {
+        ...authorization.expectedVerifiedCommitByTask,
+        [task.taskId]: commit.commitSha,
+      };
+      authorization.expectedVerifiedIdentityByTask = {
+        ...authorization.expectedVerifiedIdentityByTask,
+        [task.taskId]: { ...reviewerIdentity },
+      };
+      authorization.currentRepositoryCommitSha = commit.commitSha;
       remaining.delete(task.taskId);
       progressed = true;
     }
-    if (!progressed) return stop("POLICY_DENIED", denials.map((reason) => reason.code).join(", "));
+    if (!progressed) {
+      if (taskBlocked) return { status: "BLOCKED", states, trace };
+      return stop("POLICY_DENIED", denials.map((reason) => reason.code).join(", "));
+    }
   }
-  return { status: "ALL_TASKS_VERIFIED", states, trace };
+  return { status: taskBlocked ? "BLOCKED" : "ALL_TASKS_VERIFIED", states, trace };
 }

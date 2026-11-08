@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   evaluateDispatchEligibility,
+  taskGraphSnapshot,
   validateTaskGraph,
   type DenialReason,
   type DispatchInput,
   type TaskProposal,
   type TrustedAuthorizationContext,
+  type TrustedVerificationEvidence,
 } from "../../src/orchestration/policy.js";
 import {
   applyTaskTransition,
@@ -15,12 +17,21 @@ import {
   type TaskStage,
   type TaskState,
 } from "../../src/orchestration/state.js";
+import type { ExecutionIdentity } from "../../src/orchestration/contracts.js";
 
 const task = (taskId: string, dependencies: string[] = []): TaskProposal => ({
   taskId,
   dependencies,
   fileScope: [`src/${taskId}.ts`],
   risk: "LOW",
+});
+const commitSha = (id: string): string => id.repeat(40);
+const verifiedIdentity = (taskId: string): ExecutionIdentity => ({
+  schemaVersion: 1,
+  runId: "run-1",
+  taskId,
+  attemptId: `review-${taskId}`,
+  requirementsVersion: "requirements-v1",
 });
 
 function advance(state: TaskState, to: TaskStage, kind: StageDecisionKind): TaskState {
@@ -67,6 +78,8 @@ function authorization(tasks: readonly TaskProposal[]): TrustedAuthorizationCont
     environmentAuthorized: true,
     authorizationEvidenceReferences: ["approval-1"],
     verifiedTaskEvidence: {},
+    expectedVerifiedCommitByTask: {},
+    expectedVerifiedIdentityByTask: {},
     independenceAssessments: [],
   };
 }
@@ -129,21 +142,149 @@ test("requires all direct and transitive predecessors to be verified with curren
   deniedFor(request, "DEPENDENCY_NOT_VERIFIED");
 
   const auth = request.authorization as TrustedAuthorizationContext;
+  auth.currentRunId = "run-1";
   const withVerifiedB = { ...request, states: { ...request.states, b: verifiedTask() } };
   deniedFor(withVerifiedB, "DEPENDENCY_NOT_VERIFIED");
   const withBothVerified = { ...withVerifiedB, states: { ...withVerifiedB.states, a: verifiedTask() } };
   deniedFor(withBothVerified, "DEPENDENCY_EVIDENCE_MISSING");
 
   auth.verifiedTaskEvidence = {
-    a: { requirementsVersion: "requirements-v1", evidenceReferences: ["review-a"] },
-    b: { requirementsVersion: "requirements-v1", evidenceReferences: ["review-b"] },
+    a: { identity: verifiedIdentity("a"), requirementsVersion: "requirements-v1", commitSha: commitSha("a"), evidenceReferences: ["review-a"] },
+    b: { identity: verifiedIdentity("b"), requirementsVersion: "requirements-v1", commitSha: commitSha("b"), evidenceReferences: ["review-b"] },
   };
+  auth.expectedVerifiedCommitByTask = { a: commitSha("a"), b: commitSha("b") };
+  auth.expectedVerifiedIdentityByTask = { a: verifiedIdentity("a"), b: verifiedIdentity("b") };
   assert.deepEqual(evaluateDispatchEligibility(withBothVerified), { eligible: true, reasons: [] });
   auth.verifiedTaskEvidence = {
     ...auth.verifiedTaskEvidence,
-    a: { requirementsVersion: "requirements-v0", evidenceReferences: ["old-review"] },
+    a: { identity: verifiedIdentity("a"), requirementsVersion: "requirements-v0", commitSha: commitSha("a"), evidenceReferences: ["old-review"] },
   };
   deniedFor(withBothVerified, "DEPENDENCY_EVIDENCE_MISSING");
+});
+
+test("predecessor proof must match an independently expected verified commit", () => {
+  const request = input([task("a"), task("b", ["a"])], "b");
+  request.states = { ...request.states, a: verifiedTask() };
+  const auth = request.authorization as TrustedAuthorizationContext;
+  auth.currentRunId = "run-1";
+  const matchingProof = {
+    identity: verifiedIdentity("a"),
+    requirementsVersion: "requirements-v1",
+    commitSha: commitSha("a"),
+    evidenceReferences: ["independent-review-a"],
+  };
+  auth.verifiedTaskEvidence = { a: matchingProof };
+  auth.expectedVerifiedCommitByTask = { a: commitSha("a") };
+  auth.expectedVerifiedIdentityByTask = { a: verifiedIdentity("a") };
+  assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
+
+  auth.verifiedTaskEvidence = { a: { ...matchingProof, commitSha: commitSha("b") } };
+  deniedFor(request, "DEPENDENCY_COMMIT_MISMATCH");
+  auth.verifiedTaskEvidence = { a: { ...matchingProof, commitSha: undefined as unknown as string } };
+  deniedFor(request, "DEPENDENCY_EVIDENCE_MISSING");
+  auth.verifiedTaskEvidence = { a: { ...matchingProof, commitSha: "not-a-sha" } };
+  deniedFor(request, "DEPENDENCY_EVIDENCE_MISSING");
+  auth.verifiedTaskEvidence = { a: { ...matchingProof, requirementsVersion: "requirements-v0" } };
+  deniedFor(request, "DEPENDENCY_EVIDENCE_MISSING");
+  auth.verifiedTaskEvidence = { a: matchingProof };
+  auth.expectedVerifiedCommitByTask = { a: commitSha("b") };
+  deniedFor(request, "DEPENDENCY_COMMIT_MISMATCH");
+  auth.expectedVerifiedCommitByTask = {};
+  deniedFor(request, "DEPENDENCY_EXPECTED_COMMIT_MISSING");
+  auth.expectedVerifiedCommitByTask = { a: "invalid" };
+  deniedFor(request, "DEPENDENCY_EXPECTED_COMMIT_MISSING");
+});
+
+test("same-commit predecessor proof must match its independently expected execution", () => {
+  const request = input([task("a"), task("b", ["a"])], "b");
+  request.states = { ...request.states, a: verifiedTask() };
+  const auth = request.authorization as TrustedAuthorizationContext;
+  auth.currentRunId = "run-1";
+  const expected = verifiedIdentity("a");
+  const proof: TrustedVerificationEvidence = {
+    identity: expected,
+    requirementsVersion: "requirements-v1",
+    commitSha: commitSha("a"),
+    evidenceReferences: ["independent-review-a"],
+  };
+  auth.verifiedTaskEvidence = { a: proof };
+  auth.expectedVerifiedCommitByTask = { a: commitSha("a") };
+  auth.expectedVerifiedIdentityByTask = { a: expected };
+  assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
+
+  for (const identity of [
+    { ...expected, runId: "old-run" },
+    { ...expected, taskId: "other-task" },
+    { ...expected, attemptId: "old-review-attempt" },
+    { ...expected, requirementsVersion: "requirements-v0" },
+  ]) {
+    auth.verifiedTaskEvidence = { a: { ...proof, identity } };
+    deniedFor(request, "DEPENDENCY_IDENTITY_MISMATCH");
+  }
+
+  const missingIdentity: Partial<TrustedVerificationEvidence> = { ...proof };
+  delete missingIdentity.identity;
+  auth.verifiedTaskEvidence = { a: missingIdentity as TrustedVerificationEvidence };
+  deniedFor(request, "DEPENDENCY_IDENTITY_MISSING");
+  auth.verifiedTaskEvidence = { a: { ...proof, identity: { ...expected, attemptId: " " } } };
+  deniedFor(request, "DEPENDENCY_IDENTITY_MISSING");
+  auth.verifiedTaskEvidence = { a: { ...proof, identity: { ...expected, claimedAuthority: true } as ExecutionIdentity } };
+  deniedFor(request, "DEPENDENCY_IDENTITY_MISSING");
+
+  auth.verifiedTaskEvidence = { a: proof };
+  auth.expectedVerifiedIdentityByTask = {};
+  deniedFor(request, "DEPENDENCY_EXPECTED_IDENTITY_MISSING");
+  auth.expectedVerifiedIdentityByTask = { a: { ...expected, attemptId: "" } };
+  deniedFor(request, "DEPENDENCY_EXPECTED_IDENTITY_MISSING");
+});
+
+test("predecessor proof and expected identity must each belong to the trusted current run", () => {
+  const request = input([task("a"), task("b", ["a"])], "b");
+  request.states = { ...request.states, a: verifiedTask() };
+  const auth = request.authorization as TrustedAuthorizationContext;
+  const currentIdentity = verifiedIdentity("a");
+  const oldIdentity = { ...currentIdentity, runId: "run-older" };
+  const proof: TrustedVerificationEvidence = {
+    identity: currentIdentity,
+    requirementsVersion: "requirements-v1",
+    commitSha: commitSha("a"),
+    evidenceReferences: ["independent-review-a"],
+  };
+  auth.currentRunId = "run-1";
+  auth.verifiedTaskEvidence = { a: proof };
+  auth.expectedVerifiedCommitByTask = { a: commitSha("a") };
+  auth.expectedVerifiedIdentityByTask = { a: currentIdentity };
+  assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
+
+  auth.verifiedTaskEvidence = { a: { ...proof, identity: oldIdentity } };
+  auth.expectedVerifiedIdentityByTask = { a: oldIdentity };
+  const stale = evaluateDispatchEligibility(request);
+  assert.equal(stale.eligible, false);
+  if (!stale.eligible) {
+    assert.deepEqual(stale.reasons, [
+      { code: "DEPENDENCY_EXPECTED_RUN_MISMATCH", taskId: "a", detail: "Expected predecessor execution belongs to a different run" },
+      { code: "DEPENDENCY_PROOF_RUN_MISMATCH", taskId: "a", detail: "Predecessor verification evidence belongs to a different run" },
+    ]);
+  }
+
+  auth.expectedVerifiedIdentityByTask = { a: currentIdentity };
+  deniedFor(request, "DEPENDENCY_PROOF_RUN_MISMATCH");
+
+  auth.verifiedTaskEvidence = { a: proof };
+  auth.expectedVerifiedIdentityByTask = { a: oldIdentity };
+  deniedFor(request, "DEPENDENCY_EXPECTED_RUN_MISMATCH");
+
+  auth.expectedVerifiedIdentityByTask = { a: currentIdentity };
+  for (const currentRunId of [undefined, "", " ", " run-1 "]) {
+    if (currentRunId === undefined) delete auth.currentRunId;
+    else auth.currentRunId = currentRunId;
+    deniedFor(request, "DEPENDENCY_CURRENT_RUN_MISSING");
+  }
+});
+
+test("a missing current run only guards tasks with verified predecessors", () => {
+  const request = input([task("a"), task("b", ["a"])], "a");
+  assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
 });
 
 test("a blocked predecessor cannot authorize dispatch", () => {
@@ -156,15 +297,23 @@ test("a claimed verified predecessor with inconsistent stage history cannot disp
   const request = input([task("a"), task("b", ["a"])], "b");
   request.states = { ...request.states, a: { ...createPendingTask(), status: "VERIFIED" } };
   (request.authorization as TrustedAuthorizationContext).verifiedTaskEvidence = {
-    a: { requirementsVersion: "requirements-v1", evidenceReferences: ["review-a"] },
+    a: { identity: verifiedIdentity("a"), requirementsVersion: "requirements-v1", commitSha: commitSha("a"), evidenceReferences: ["review-a"] },
   };
+  (request.authorization as TrustedAuthorizationContext).expectedVerifiedCommitByTask = { a: commitSha("a") };
+  (request.authorization as TrustedAuthorizationContext).expectedVerifiedIdentityByTask = { a: verifiedIdentity("a") };
   deniedFor(request, "STATE_INCONSISTENT");
 });
 
 test("fails closed on missing or stale authorization and changed approved dependencies", () => {
   const request = input([task("a")], "a");
+  const missingExpectedCommits = { ...request.authorization };
+  delete missingExpectedCommits.expectedVerifiedCommitByTask;
+  const missingExpectedIdentities = { ...request.authorization };
+  delete missingExpectedIdentities.expectedVerifiedIdentityByTask;
   deniedFor({ ...request, authorization: undefined }, "AUTHORIZATION_MISSING");
   deniedFor({ ...request, authorization: { ...request.authorization, authorizationEvidenceReferences: [] } }, "AUTHORIZATION_MISSING");
+  deniedFor({ ...request, authorization: missingExpectedCommits }, "AUTHORIZATION_MISSING");
+  deniedFor({ ...request, authorization: missingExpectedIdentities }, "AUTHORIZATION_MISSING");
   deniedFor({ ...request, authorization: { ...request.authorization, authorizedRequirementsVersion: "  " } }, "AUTHORIZATION_MISSING");
   deniedFor({ ...request, proposedRequirementsVersion: "requirements-v0" }, "REQUIREMENTS_MISMATCH");
   deniedFor({ ...request, authorization: { ...request.authorization, currentRequirementsVersion: "requirements-v2" } }, "REQUIREMENTS_MISMATCH");
@@ -216,13 +365,19 @@ test("blocked tasks require anchored, current technical independence evidence", 
   auth.independenceAssessments = [{
     candidateTaskId: "candidate",
     blockedTaskId: "blocked",
+    blockIndex: 0,
+    runId: "run-1",
+    taskGraphSnapshot: taskGraphSnapshot(request.tasks),
     requirementsVersion: "requirements-v1",
+    repositoryCommitSha: commitSha("b"),
     blockerEvidenceReference: "blocker-evidence",
     impact: "INDEPENDENT",
     blockerScope: "TASK_LOCAL",
-    assessedAreas: ["CODE", "DATA_CONTRACT", "BEHAVIOR"],
+    assessedAreas: ["CODE", "DATA_CONTRACT", "BEHAVIOR", "SHARED_FILES", "INTERFACES", "INTEGRATION"],
     evidenceReferences: ["shared-contract-analysis"],
   }];
+  auth.currentRunId = "run-1";
+  auth.currentRepositoryCommitSha = commitSha("b");
   assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
   const assessment = auth.independenceAssessments[0]!;
   auth.independenceAssessments = [{ ...assessment, blockerEvidenceReference: "stale-blocker" }];
@@ -232,6 +387,71 @@ test("blocked tasks require anchored, current technical independence evidence", 
   auth.independenceAssessments = [{ ...assessment, blockerScope: "SHARED" }];
   deniedFor(request, "BLOCKER_IMPACT_UNRESOLVED");
   auth.independenceAssessments = [assessment, { ...assessment, impact: "AFFECTED" }];
+  deniedFor(request, "INDEPENDENCE_UNPROVEN");
+  auth.independenceAssessments = [{ ...assessment, runId: "old-run" }];
+  deniedFor(request, "INDEPENDENCE_UNPROVEN");
+  auth.independenceAssessments = [{ ...assessment, taskGraphSnapshot: "old-graph" }];
+  deniedFor(request, "INDEPENDENCE_UNPROVEN");
+  auth.independenceAssessments = [{ ...assessment, repositoryCommitSha: commitSha("a") }];
+  deniedFor(request, "INDEPENDENCE_UNPROVEN");
+  auth.independenceAssessments = [{ ...assessment, assessedAreas: ["CODE"] }];
+  deniedFor(request, "INDEPENDENCE_UNPROVEN");
+});
+
+test("independence assessment is bound to the current block even when evidence and commit repeat", () => {
+  const request = input([task("blocked"), task("candidate")], "candidate");
+  request.states = { ...request.states, blocked: blockedTask() };
+  const auth = request.authorization as TrustedAuthorizationContext;
+  const assessment = {
+    candidateTaskId: "candidate",
+    blockedTaskId: "blocked",
+    blockIndex: 0,
+    runId: "run-1",
+    taskGraphSnapshot: taskGraphSnapshot(request.tasks),
+    requirementsVersion: "requirements-v1",
+    repositoryCommitSha: commitSha("b"),
+    blockerEvidenceReference: "blocker-evidence",
+    impact: "INDEPENDENT" as const,
+    blockerScope: "TASK_LOCAL" as const,
+    assessedAreas: ["CODE", "DATA_CONTRACT", "BEHAVIOR", "SHARED_FILES", "INTERFACES", "INTEGRATION"] as const,
+    evidenceReferences: ["shared-contract-analysis"],
+  };
+  auth.currentRunId = "run-1";
+  auth.currentRepositoryCommitSha = commitSha("b");
+  auth.independenceAssessments = [assessment];
+  assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
+
+  const resumed = applyTaskTransition(request.states.blocked!, {
+    type: "RESUME",
+    decision: {
+      blockerResolved: true, requirementsValid: true, repositoryValid: true,
+      dependenciesValid: true, environmentAuthorized: true,
+      evidenceReferences: ["trusted-resume"], stageRevalidations: [],
+    },
+  });
+  assert.equal(resumed.applied, true);
+  if (!resumed.applied) return;
+  const blockedAgain = applyTaskTransition(resumed.state, {
+    type: "BLOCK",
+    reason: { code: "EVIDENCE", detail: "Task-local question remains" },
+    evidenceReferences: ["blocker-evidence"],
+    authorizedNextAction: "Investigate",
+  });
+  assert.equal(blockedAgain.applied, true);
+  if (!blockedAgain.applied) return;
+  assert.equal(blockedAgain.state.blockHistory.length, 2);
+  assert.equal(blockedAgain.state.recoveryHistory.length, 1);
+  request.states = { ...request.states, blocked: blockedAgain.state };
+  deniedFor(request, "INDEPENDENCE_UNPROVEN");
+
+  auth.independenceAssessments = [{ ...assessment, blockIndex: 1 }];
+  assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
+  for (const blockIndex of [undefined, null, -1, 0.5, NaN, "1", 2]) {
+    auth.independenceAssessments = [{ ...assessment, blockIndex: blockIndex as number }];
+    deniedFor(request, "INDEPENDENCE_UNPROVEN");
+  }
+  const { blockIndex: _removed, ...missingIndex } = assessment;
+  auth.independenceAssessments = [missingIndex as typeof assessment];
   deniedFor(request, "INDEPENDENCE_UNPROVEN");
 });
 

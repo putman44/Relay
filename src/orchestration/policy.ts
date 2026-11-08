@@ -1,4 +1,4 @@
-import type { PlannerResponse } from "./contracts.js";
+import { AGENT_RESPONSE_SCHEMA_VERSION, type ExecutionIdentity, type PlannerResponse } from "./contracts.js";
 import { evaluateTaskTransition, taskStateConsistencyError, type TaskState } from "./state.js";
 
 type ReadyPlan = Extract<PlannerResponse, { status: "READY" }>;
@@ -78,7 +78,9 @@ export function validateTaskGraph(tasks: readonly TaskProposal[]): GraphValidati
 }
 
 export interface TrustedVerificationEvidence {
+  identity: ExecutionIdentity;
   requirementsVersion: string;
+  commitSha: string;
   evidenceReferences: readonly string[];
 }
 
@@ -86,13 +88,27 @@ export interface TrustedVerificationEvidence {
 export interface TrustedIndependenceAssessment {
   candidateTaskId: string;
   blockedTaskId: string;
+  /** Zero-based index of the BLOCKED event in the blocked task's blockHistory. */
+  blockIndex: number;
+  runId: string;
+  taskGraphSnapshot: string;
   requirementsVersion: string;
+  repositoryCommitSha: string;
   blockerEvidenceReference: string;
   impact: "INDEPENDENT" | "AFFECTED" | "UNCERTAIN";
   blockerScope: "TASK_LOCAL" | "SHARED" | "UNKNOWN";
-  assessedAreas: readonly ("CODE" | "DATA_CONTRACT" | "BEHAVIOR")[];
+  assessedAreas: readonly ("CODE" | "DATA_CONTRACT" | "BEHAVIOR" | "SHARED_FILES" | "INTERFACES" | "INTEGRATION")[];
   evidenceReferences: readonly string[];
 }
+
+/** Exact ordered graph and task scopes considered by a trusted assessment. */
+export const taskGraphSnapshot = (tasks: readonly TaskProposal[]): string => JSON.stringify(
+  tasks.map(({ taskId, dependencies, fileScope, risk }) => ({ taskId, dependencies, fileScope, risk })),
+);
+
+const requiredIndependenceAreas = [
+  "CODE", "DATA_CONTRACT", "BEHAVIOR", "SHARED_FILES", "INTERFACES", "INTEGRATION",
+] as const;
 
 /** All fields are supplied from trusted orchestrator state, never a planner reply. */
 export interface TrustedAuthorizationContext {
@@ -108,7 +124,14 @@ export interface TrustedAuthorizationContext {
   environmentAuthorized: boolean;
   authorizationEvidenceReferences: readonly string[];
   verifiedTaskEvidence: Readonly<Record<string, TrustedVerificationEvidence>>;
+  /** Exact verified commits established independently from repository state, never agent claims. */
+  expectedVerifiedCommitByTask: Readonly<Record<string, string>>;
+  /** Expected reviewer executions established by the orchestrator, not agent responses. */
+  expectedVerifiedIdentityByTask: Readonly<Record<string, ExecutionIdentity>>;
   independenceAssessments: readonly TrustedIndependenceAssessment[];
+  /** Independently established current run; required for verified predecessors and blocked-task assessments. */
+  currentRunId?: string;
+  currentRepositoryCommitSha?: string;
 }
 
 export interface DispatchInput {
@@ -129,6 +152,14 @@ export interface DenialReason {
     | "CONCURRENT_IMPLEMENTATION"
     | "DEPENDENCY_NOT_VERIFIED"
     | "DEPENDENCY_EVIDENCE_MISSING"
+    | "DEPENDENCY_EXPECTED_COMMIT_MISSING"
+    | "DEPENDENCY_COMMIT_MISMATCH"
+    | "DEPENDENCY_IDENTITY_MISSING"
+    | "DEPENDENCY_EXPECTED_IDENTITY_MISSING"
+    | "DEPENDENCY_IDENTITY_MISMATCH"
+    | "DEPENDENCY_CURRENT_RUN_MISSING"
+    | "DEPENDENCY_PROOF_RUN_MISMATCH"
+    | "DEPENDENCY_EXPECTED_RUN_MISMATCH"
     | "AUTHORIZATION_MISSING"
     | "REQUIREMENTS_MISMATCH"
     | "TASK_NOT_AUTHORIZED"
@@ -164,6 +195,24 @@ const hasReferences = (references: readonly string[] | undefined): references is
   references.every((reference) => typeof reference === "string" && reference.trim().length > 0);
 const hasText = (value: string | undefined): boolean =>
   typeof value === "string" && value.trim().length > 0;
+const isCommitSha = (value: unknown): value is string =>
+  typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
+const isExecutionIdentity = (value: unknown): value is ExecutionIdentity => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const identity = value as Record<string, unknown>;
+  const fields = ["schemaVersion", "runId", "taskId", "attemptId", "requirementsVersion"];
+  return Object.keys(identity).length === fields.length &&
+    fields.every((field) => Object.hasOwn(identity, field)) &&
+    identity.schemaVersion === AGENT_RESPONSE_SCHEMA_VERSION &&
+    [identity.runId, identity.taskId, identity.attemptId, identity.requirementsVersion]
+      .every((field) => typeof field === "string" && field.trim().length > 0 && field.trim() === field);
+};
+const sameExecutionIdentity = (actual: ExecutionIdentity, expected: ExecutionIdentity): boolean =>
+  actual.schemaVersion === expected.schemaVersion &&
+  actual.runId === expected.runId &&
+  actual.taskId === expected.taskId &&
+  actual.attemptId === expected.attemptId &&
+  actual.requirementsVersion === expected.requirementsVersion;
 
 // Scope entries are exact repository-relative files; wildcard or path traversal is not authority.
 const isExactRelativeFile = (file: string): boolean =>
@@ -227,6 +276,12 @@ export function evaluateDispatchEligibility(input: DispatchInput): DispatchEligi
       !Array.isArray(auth.authorizedTaskIds) || !auth.approvedDependenciesByTask ||
       !Array.isArray(auth.approvedFileScope) || !auth.maxAuthorizedRisk ||
       !auth.assessedRiskByTask || !auth.verifiedTaskEvidence ||
+      !auth.expectedVerifiedCommitByTask ||
+      typeof auth.expectedVerifiedCommitByTask !== "object" ||
+      Array.isArray(auth.expectedVerifiedCommitByTask) ||
+      !auth.expectedVerifiedIdentityByTask ||
+      typeof auth.expectedVerifiedIdentityByTask !== "object" ||
+      Array.isArray(auth.expectedVerifiedIdentityByTask) ||
       !Array.isArray(auth.independenceAssessments)) {
     deny("AUTHORIZATION_MISSING", "Required trusted authorization context is incomplete");
     return { eligible: false, reasons };
@@ -283,24 +338,62 @@ export function evaluateDispatchEligibility(input: DispatchInput): DispatchEligi
       if (ownValue(input.states, predecessorId)?.status !== "VERIFIED") {
         deny("DEPENDENCY_NOT_VERIFIED", "Required predecessor is not verified", predecessorId);
       }
+      const currentRunId = auth.currentRunId;
+      const validCurrentRunId = hasText(currentRunId) && currentRunId?.trim() === currentRunId;
+      if (!validCurrentRunId) {
+        deny("DEPENDENCY_CURRENT_RUN_MISSING", "Trusted current run ID is missing or malformed", predecessorId);
+      }
       const proof = ownValue(auth.verifiedTaskEvidence, predecessorId);
       if (!proof || proof.requirementsVersion !== auth.currentRequirementsVersion ||
-          !hasReferences(proof.evidenceReferences)) {
+          !hasReferences(proof.evidenceReferences) || !isCommitSha(proof.commitSha)) {
         deny("DEPENDENCY_EVIDENCE_MISSING", "Current independent verification evidence is missing", predecessorId);
+      }
+      const expectedCommit = ownValue(auth.expectedVerifiedCommitByTask, predecessorId);
+      if (!isCommitSha(expectedCommit)) {
+        deny("DEPENDENCY_EXPECTED_COMMIT_MISSING", "Independently established verified commit is missing or invalid", predecessorId);
+      } else if (proof && isCommitSha(proof.commitSha) && proof.commitSha !== expectedCommit) {
+        deny("DEPENDENCY_COMMIT_MISMATCH", "Verification evidence is for a different commit", predecessorId);
+      }
+      const expectedIdentity = ownValue(auth.expectedVerifiedIdentityByTask, predecessorId);
+      if (!isExecutionIdentity(expectedIdentity) || expectedIdentity.taskId !== predecessorId ||
+          expectedIdentity.requirementsVersion !== auth.currentRequirementsVersion) {
+        deny("DEPENDENCY_EXPECTED_IDENTITY_MISSING", "Current expected predecessor execution identity is missing or invalid", predecessorId);
+      } else if (validCurrentRunId && expectedIdentity.runId !== currentRunId) {
+        deny("DEPENDENCY_EXPECTED_RUN_MISMATCH", "Expected predecessor execution belongs to a different run", predecessorId);
+      }
+      if (!proof || !isExecutionIdentity(proof.identity)) {
+        deny("DEPENDENCY_IDENTITY_MISSING", "Predecessor verification identity is missing or malformed", predecessorId);
+      } else {
+        if (validCurrentRunId && proof.identity.runId !== currentRunId) {
+          deny("DEPENDENCY_PROOF_RUN_MISMATCH", "Predecessor verification evidence belongs to a different run", predecessorId);
+        }
+        if (isExecutionIdentity(expectedIdentity) &&
+            (proof.identity.requirementsVersion !== proof.requirementsVersion ||
+             !sameExecutionIdentity(proof.identity, expectedIdentity))) {
+          deny("DEPENDENCY_IDENTITY_MISMATCH", "Verification evidence belongs to a different execution", predecessorId);
+        }
       }
     }
 
     for (const task of input.tasks) {
       if (task.taskId === candidate.taskId || ownValue(input.states, task.taskId)?.status !== "BLOCKED") continue;
       if (predecessors.has(task.taskId)) continue; // Already denied as an unverified dependency.
-      const blocker = ownValue(input.states, task.taskId)?.blockHistory.at(-1);
+      const blockHistory = ownValue(input.states, task.taskId)?.blockHistory;
+      const blocker = blockHistory?.at(-1);
       const matchingAssessments = auth.independenceAssessments.filter((item) =>
-        item.candidateTaskId === candidate.taskId && item.blockedTaskId === task.taskId);
+        item && item.candidateTaskId === candidate.taskId && item.blockedTaskId === task.taskId &&
+        item.runId === auth.currentRunId && item.repositoryCommitSha === auth.currentRepositoryCommitSha);
       const assessment = matchingAssessments[0];
-      if (matchingAssessments.length !== 1 || !assessment || !blocker ||
+      if (matchingAssessments.length !== 1 || !assessment || !blocker || !blockHistory ||
+          !Number.isSafeInteger(assessment.blockIndex) ||
+          assessment.blockIndex !== blockHistory.length - 1 ||
+          !hasText(auth.currentRunId) || !isCommitSha(auth.currentRepositoryCommitSha) ||
+          assessment.taskGraphSnapshot !== taskGraphSnapshot(input.tasks) ||
           assessment.requirementsVersion !== auth.currentRequirementsVersion ||
           !blocker.evidenceReferences.includes(assessment.blockerEvidenceReference) ||
-          assessment.assessedAreas.length === 0 ||
+          !Array.isArray(assessment.assessedAreas) ||
+          assessment.assessedAreas.length !== requiredIndependenceAreas.length ||
+          !requiredIndependenceAreas.every((area) => assessment.assessedAreas.includes(area)) ||
           !hasReferences(assessment.evidenceReferences)) {
         deny("INDEPENDENCE_UNPROVEN", "Current evidence of independence from blocked task is missing", task.taskId);
       } else if (assessment.impact !== "INDEPENDENT" || assessment.blockerScope !== "TASK_LOCAL") {
