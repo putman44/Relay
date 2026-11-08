@@ -129,7 +129,7 @@ export interface TrustedAuthorizationContext {
   /** Expected reviewer executions established by the orchestrator, not agent responses. */
   expectedVerifiedIdentityByTask: Readonly<Record<string, ExecutionIdentity>>;
   independenceAssessments: readonly TrustedIndependenceAssessment[];
-  /** Current trusted context; required when dispatching past a blocked task. */
+  /** Independently established current run; required for verified predecessors and blocked-task assessments. */
   currentRunId?: string;
   currentRepositoryCommitSha?: string;
 }
@@ -157,6 +157,9 @@ export interface DenialReason {
     | "DEPENDENCY_IDENTITY_MISSING"
     | "DEPENDENCY_EXPECTED_IDENTITY_MISSING"
     | "DEPENDENCY_IDENTITY_MISMATCH"
+    | "DEPENDENCY_CURRENT_RUN_MISSING"
+    | "DEPENDENCY_PROOF_RUN_MISMATCH"
+    | "DEPENDENCY_EXPECTED_RUN_MISMATCH"
     | "AUTHORIZATION_MISSING"
     | "REQUIREMENTS_MISMATCH"
     | "TASK_NOT_AUTHORIZED"
@@ -335,6 +338,11 @@ export function evaluateDispatchEligibility(input: DispatchInput): DispatchEligi
       if (ownValue(input.states, predecessorId)?.status !== "VERIFIED") {
         deny("DEPENDENCY_NOT_VERIFIED", "Required predecessor is not verified", predecessorId);
       }
+      const currentRunId = auth.currentRunId;
+      const validCurrentRunId = hasText(currentRunId) && currentRunId?.trim() === currentRunId;
+      if (!validCurrentRunId) {
+        deny("DEPENDENCY_CURRENT_RUN_MISSING", "Trusted current run ID is missing or malformed", predecessorId);
+      }
       const proof = ownValue(auth.verifiedTaskEvidence, predecessorId);
       if (!proof || proof.requirementsVersion !== auth.currentRequirementsVersion ||
           !hasReferences(proof.evidenceReferences) || !isCommitSha(proof.commitSha)) {
@@ -350,13 +358,20 @@ export function evaluateDispatchEligibility(input: DispatchInput): DispatchEligi
       if (!isExecutionIdentity(expectedIdentity) || expectedIdentity.taskId !== predecessorId ||
           expectedIdentity.requirementsVersion !== auth.currentRequirementsVersion) {
         deny("DEPENDENCY_EXPECTED_IDENTITY_MISSING", "Current expected predecessor execution identity is missing or invalid", predecessorId);
+      } else if (validCurrentRunId && expectedIdentity.runId !== currentRunId) {
+        deny("DEPENDENCY_EXPECTED_RUN_MISMATCH", "Expected predecessor execution belongs to a different run", predecessorId);
       }
       if (!proof || !isExecutionIdentity(proof.identity)) {
         deny("DEPENDENCY_IDENTITY_MISSING", "Predecessor verification identity is missing or malformed", predecessorId);
-      } else if (isExecutionIdentity(expectedIdentity) &&
-                 (proof.identity.requirementsVersion !== proof.requirementsVersion ||
-                  !sameExecutionIdentity(proof.identity, expectedIdentity))) {
-        deny("DEPENDENCY_IDENTITY_MISMATCH", "Verification evidence belongs to a different execution", predecessorId);
+      } else {
+        if (validCurrentRunId && proof.identity.runId !== currentRunId) {
+          deny("DEPENDENCY_PROOF_RUN_MISMATCH", "Predecessor verification evidence belongs to a different run", predecessorId);
+        }
+        if (isExecutionIdentity(expectedIdentity) &&
+            (proof.identity.requirementsVersion !== proof.requirementsVersion ||
+             !sameExecutionIdentity(proof.identity, expectedIdentity))) {
+          deny("DEPENDENCY_IDENTITY_MISMATCH", "Verification evidence belongs to a different execution", predecessorId);
+        }
       }
     }
 

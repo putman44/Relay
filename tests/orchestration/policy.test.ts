@@ -142,6 +142,7 @@ test("requires all direct and transitive predecessors to be verified with curren
   deniedFor(request, "DEPENDENCY_NOT_VERIFIED");
 
   const auth = request.authorization as TrustedAuthorizationContext;
+  auth.currentRunId = "run-1";
   const withVerifiedB = { ...request, states: { ...request.states, b: verifiedTask() } };
   deniedFor(withVerifiedB, "DEPENDENCY_NOT_VERIFIED");
   const withBothVerified = { ...withVerifiedB, states: { ...withVerifiedB.states, a: verifiedTask() } };
@@ -165,6 +166,7 @@ test("predecessor proof must match an independently expected verified commit", (
   const request = input([task("a"), task("b", ["a"])], "b");
   request.states = { ...request.states, a: verifiedTask() };
   const auth = request.authorization as TrustedAuthorizationContext;
+  auth.currentRunId = "run-1";
   const matchingProof = {
     identity: verifiedIdentity("a"),
     requirementsVersion: "requirements-v1",
@@ -197,6 +199,7 @@ test("same-commit predecessor proof must match its independently expected execut
   const request = input([task("a"), task("b", ["a"])], "b");
   request.states = { ...request.states, a: verifiedTask() };
   const auth = request.authorization as TrustedAuthorizationContext;
+  auth.currentRunId = "run-1";
   const expected = verifiedIdentity("a");
   const proof: TrustedVerificationEvidence = {
     identity: expected,
@@ -233,6 +236,55 @@ test("same-commit predecessor proof must match its independently expected execut
   deniedFor(request, "DEPENDENCY_EXPECTED_IDENTITY_MISSING");
   auth.expectedVerifiedIdentityByTask = { a: { ...expected, attemptId: "" } };
   deniedFor(request, "DEPENDENCY_EXPECTED_IDENTITY_MISSING");
+});
+
+test("predecessor proof and expected identity must each belong to the trusted current run", () => {
+  const request = input([task("a"), task("b", ["a"])], "b");
+  request.states = { ...request.states, a: verifiedTask() };
+  const auth = request.authorization as TrustedAuthorizationContext;
+  const currentIdentity = verifiedIdentity("a");
+  const oldIdentity = { ...currentIdentity, runId: "run-older" };
+  const proof: TrustedVerificationEvidence = {
+    identity: currentIdentity,
+    requirementsVersion: "requirements-v1",
+    commitSha: commitSha("a"),
+    evidenceReferences: ["independent-review-a"],
+  };
+  auth.currentRunId = "run-1";
+  auth.verifiedTaskEvidence = { a: proof };
+  auth.expectedVerifiedCommitByTask = { a: commitSha("a") };
+  auth.expectedVerifiedIdentityByTask = { a: currentIdentity };
+  assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
+
+  auth.verifiedTaskEvidence = { a: { ...proof, identity: oldIdentity } };
+  auth.expectedVerifiedIdentityByTask = { a: oldIdentity };
+  const stale = evaluateDispatchEligibility(request);
+  assert.equal(stale.eligible, false);
+  if (!stale.eligible) {
+    assert.deepEqual(stale.reasons, [
+      { code: "DEPENDENCY_EXPECTED_RUN_MISMATCH", taskId: "a", detail: "Expected predecessor execution belongs to a different run" },
+      { code: "DEPENDENCY_PROOF_RUN_MISMATCH", taskId: "a", detail: "Predecessor verification evidence belongs to a different run" },
+    ]);
+  }
+
+  auth.expectedVerifiedIdentityByTask = { a: currentIdentity };
+  deniedFor(request, "DEPENDENCY_PROOF_RUN_MISMATCH");
+
+  auth.verifiedTaskEvidence = { a: proof };
+  auth.expectedVerifiedIdentityByTask = { a: oldIdentity };
+  deniedFor(request, "DEPENDENCY_EXPECTED_RUN_MISMATCH");
+
+  auth.expectedVerifiedIdentityByTask = { a: currentIdentity };
+  for (const currentRunId of [undefined, "", " ", " run-1 "]) {
+    if (currentRunId === undefined) delete auth.currentRunId;
+    else auth.currentRunId = currentRunId;
+    deniedFor(request, "DEPENDENCY_CURRENT_RUN_MISSING");
+  }
+});
+
+test("a missing current run only guards tasks with verified predecessors", () => {
+  const request = input([task("a"), task("b", ["a"])], "a");
+  assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
 });
 
 test("a blocked predecessor cannot authorize dispatch", () => {
