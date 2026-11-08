@@ -51,6 +51,13 @@ export interface SimulatedReviewBlock {
   authorizedNextAction: string;
 }
 
+export interface SimulatedImplementerBlock {
+  identity: ExecutionIdentity;
+  reason: BlockingReason;
+  evidenceReferences: readonly string[];
+  authorizedNextAction: string;
+}
+
 export type SimulatedVerifiedTaskEvidence = TrustedVerificationEvidence;
 
 export interface SimulatedTaskInput {
@@ -58,6 +65,7 @@ export interface SimulatedTaskInput {
   reviewer: InjectedResponse;
   commit?: SimulatedCommitSnapshot;
   gates: Partial<Record<StageDecisionKind, SimulatedGate>>;
+  implementerBlock?: SimulatedImplementerBlock;
   reviewBlock?: SimulatedReviewBlock;
   verifiedTaskEvidence?: SimulatedVerifiedTaskEvidence;
 }
@@ -82,7 +90,8 @@ export type SimulationFailureCode =
   | "TRUSTED_GATE_MISMATCH"
   | "IMPLEMENTER_SCHEMA_INVALID"
   | "IMPLEMENTER_CONTEXT_MISMATCH"
-  | "IMPLEMENTER_BLOCKED"
+  | "IMPLEMENTER_BLOCK_DECISION_MISSING"
+  | "IMPLEMENTER_BLOCK_DECISION_MISMATCH"
   | "COMMIT_EVIDENCE_MISSING"
   | "COMMIT_EVIDENCE_MISMATCH"
   | "IMPLEMENTER_REPORTED_INCOMPLETE"
@@ -106,6 +115,14 @@ export interface SimulationResult {
 const hasReferences = (references: readonly string[] | undefined): boolean =>
   Array.isArray(references) && references.length > 0 &&
   references.every((reference) => typeof reference === "string" && reference.trim().length > 0);
+
+const blockingReasonCodes: readonly string[] = [
+  "DEPENDENCY", "REQUIREMENTS", "ENVIRONMENT", "EVIDENCE",
+  "EXTERNAL_ACTION", "REVIEW", "SAFETY",
+];
+
+const validBlockText = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.trim() === value;
 
 const sameIdentity = (actual: unknown, expected: ExecutionIdentity): boolean => {
   if (!actual || typeof actual !== "object" || Array.isArray(actual)) return false;
@@ -228,7 +245,26 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
           expectedRole: "implementer",
         });
         if (!blockedContext.valid) return stop("IMPLEMENTER_CONTEXT_MISMATCH", blockedContext.errors.join("; "), task.taskId);
-        return stop("IMPLEMENTER_BLOCKED", implementer.reason, task.taskId);
+        const block = taskInput.implementerBlock;
+        if (!block) return stop("IMPLEMENTER_BLOCK_DECISION_MISSING", "Trusted implementer block decision is missing", task.taskId);
+        if (!sameIdentity(block.identity, implementerIdentity) ||
+            !block.reason || typeof block.reason !== "object" ||
+            Array.isArray(block.reason) || Object.keys(block.reason).length !== 2 ||
+            !blockingReasonCodes.includes(block.reason?.code) ||
+            !validBlockText(block.reason?.detail) ||
+            !hasReferences(block.evidenceReferences) ||
+            !block.evidenceReferences.every(validBlockText) ||
+            !validBlockText(block.authorizedNextAction)) {
+          return stop("IMPLEMENTER_BLOCK_DECISION_MISMATCH", "Trusted implementer block decision is stale or incomplete", task.taskId);
+        }
+        const failure = advance(task.taskId, {
+          type: "BLOCK",
+          reason: block.reason,
+          evidenceReferences: block.evidenceReferences,
+          authorizedNextAction: block.authorizedNextAction,
+        });
+        if (failure) return failure;
+        return { status: "BLOCKED", states, trace };
       }
       const commit = taskInput.commit;
       if (!commit) return stop("COMMIT_EVIDENCE_MISSING", "Trusted commit snapshot is missing", task.taskId);

@@ -7,6 +7,7 @@ import {
   type SimulationTrace,
 } from "../../src/orchestration/simulate.js";
 import type { ExecutionIdentity } from "../../src/orchestration/contracts.js";
+import { validateRunCheckpoint } from "../../src/orchestration/checkpoint.js";
 import type { TaskProposal, TrustedAuthorizationContext } from "../../src/orchestration/policy.js";
 import type { StageDecisionKind } from "../../src/orchestration/state.js";
 
@@ -218,10 +219,9 @@ test("implementer commit claim must match the trusted simulated commit", () => {
   assert.equal(result.states.a?.status, "IMPLEMENTING");
 });
 
-test("a blocked implementer needs no simulated commit snapshot", () => {
-  const input = fixture();
-  const task = taskInputs(input, "a");
-  const identity = taskIdentity("a", "impl");
+function blockedImplementerInput(input: SimulationInput, id = "a"): SimulatedTaskInput {
+  const task = taskInputs(input, id);
+  const identity = taskIdentity(id, "impl");
   task.implementer.value = {
     ...identity,
     role: "implementer",
@@ -231,9 +231,105 @@ test("a blocked implementer needs no simulated commit snapshot", () => {
     recommendedNextAction: "Replan",
   };
   delete task.commit;
+  return task;
+}
+
+test("an authorized implementer block preserves trusted recovery context and validates as a checkpoint", () => {
+  const input = fixture([proposedTask("a"), proposedTask("b")]);
+  const task = blockedImplementerInput(input);
+  const identity = taskIdentity("a", "impl");
+  task.implementerBlock = {
+    identity,
+    reason: { code: "REQUIREMENTS", detail: "Approved file scope needs reassessment" },
+    evidenceReferences: ["trusted:scope-assessment"],
+    authorizedNextAction: "Request planner reassessment",
+  };
   const result = simulateOrchestration(input);
-  assert.equal(result.failure?.code, "IMPLEMENTER_BLOCKED");
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.states.a?.status, "BLOCKED");
+  assert.deepEqual(result.states.a?.completedStages, [{
+    stage: "PENDING", decision: "DISPATCH_APPROVED", evidenceReferences: ["trusted:a:DISPATCH_APPROVED"],
+  }]);
+  assert.deepEqual(result.states.a?.blockHistory, [{
+    lastValidStage: "IMPLEMENTING",
+    reason: { code: "REQUIREMENTS", detail: "Approved file scope needs reassessment" },
+    evidenceReferences: ["trusted:scope-assessment"],
+    authorizedNextAction: "Request planner reassessment",
+  }]);
+  assert.deepEqual(result.states.a?.recoveryHistory, []);
+  assert.equal(result.states.b?.status, "PENDING");
+  assert.deepEqual(stateTrace(result.trace), ["a:IMPLEMENTING", "a:BLOCKED"]);
+  const checkpoint = validateRunCheckpoint({
+    schemaVersion: 1,
+    revision: 1,
+    runId: plannerIdentity.runId,
+    repository: { repositoryId: "relay", branch: "feature/relay-v2-phase-2" },
+    workItemId: "issue-24",
+    authorizedRequirementsVersion: plannerIdentity.requirementsVersion,
+    authorizationEvidenceReferences: ["trusted-authorization"],
+    taskGraph: ["a", "b"].map((id) => ({
+      taskId: id, dependencies: [], fileScope: [`src/${id}.ts`], risk: "LOW",
+    })),
+    taskRecords: ["a", "b"].map((id) => ({ taskId: id, state: result.states[id] })),
+    executionRecords: [{
+      recordId: "impl-a", role: "implementer", identity,
+      evidenceReferences: ["trusted:scope-assessment"],
+    }],
+  });
+  assert.equal(checkpoint.valid, true);
+});
+
+test("an implementer report alone cannot block a task or dispatch another task", () => {
+  const input = fixture([proposedTask("a"), proposedTask("b")]);
+  blockedImplementerInput(input);
+  const result = simulateOrchestration(input);
+  assert.equal(result.failure?.code, "IMPLEMENTER_BLOCK_DECISION_MISSING");
   assert.equal(result.states.a?.status, "IMPLEMENTING");
+  assert.deepEqual(result.states.a?.blockHistory, []);
+  assert.equal(result.states.b?.status, "PENDING");
+  assert.deepEqual(stateTrace(result.trace), ["a:IMPLEMENTING"]);
+});
+
+test("invalid trusted implementer block decisions fail closed", () => {
+  const identity = taskIdentity("a", "impl");
+  const validBlock = {
+    identity,
+    reason: { code: "REQUIREMENTS" as const, detail: "Approved scope needs reassessment" },
+    evidenceReferences: ["trusted:scope-assessment"],
+    authorizedNextAction: "Request planner reassessment",
+  };
+  for (const block of [
+    { ...validBlock, identity: { ...identity, attemptId: "stale-attempt" } },
+    { ...validBlock, reason: { code: "UNKNOWN", detail: "Unclassified" } },
+    { ...validBlock, reason: { ...validBlock.reason, untrusted: "extra field" } },
+    { ...validBlock, evidenceReferences: [] },
+    { ...validBlock, authorizedNextAction: " " },
+  ]) {
+    const input = fixture();
+    blockedImplementerInput(input).implementerBlock = block as NonNullable<SimulatedTaskInput["implementerBlock"]>;
+    const result = simulateOrchestration(input);
+    assert.equal(result.failure?.code, "IMPLEMENTER_BLOCK_DECISION_MISMATCH");
+    assert.equal(result.states.a?.status, "IMPLEMENTING");
+    assert.deepEqual(result.states.a?.blockHistory, []);
+    assert.deepEqual(stateTrace(result.trace), ["a:IMPLEMENTING"]);
+  }
+});
+
+test("a stale implementer BLOCKED report cannot use a trusted block decision", () => {
+  const input = fixture();
+  const task = blockedImplementerInput(input);
+  const identity = taskIdentity("a", "impl");
+  task.implementer.value = { ...(task.implementer.value as Record<string, unknown>), attemptId: "stale-attempt" };
+  task.implementerBlock = {
+    identity,
+    reason: { code: "REQUIREMENTS", detail: "Approved scope needs reassessment" },
+    evidenceReferences: ["trusted:scope-assessment"],
+    authorizedNextAction: "Request planner reassessment",
+  };
+  const result = simulateOrchestration(input);
+  assert.equal(result.failure?.code, "IMPLEMENTER_CONTEXT_MISMATCH");
+  assert.equal(result.states.a?.status, "IMPLEMENTING");
+  assert.deepEqual(result.states.a?.blockHistory, []);
 });
 
 test("a PASSED reviewer cannot verify without its trusted review gate", () => {
