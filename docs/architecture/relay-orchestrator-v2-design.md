@@ -278,6 +278,34 @@ Previously completed implementation, tests, publication, and review must not be 
 
 **Verification scenario:** A verified commit cannot be pushed because GitHub is temporarily unavailable. After connectivity returns, Relay reconciles the branch state and, if earlier checks remain valid, resumes publication rather than launching another implementer.
 
+### 4.7 Issue-Level Execution State
+
+#### FR-014 — Issue-Level Completion
+
+The orchestrator must track the overall engineering issue execution separately from its internal task states and the GitHub issue's own open/closed status.
+
+The overall execution remains `IN_PROGRESS` while internal tasks or mandatory final integration verification are incomplete. Once every required task is verified and final integration review passes against the current authorized requirements and commit, the execution may enter an awaiting-human-merge phase. It must not be marked `COMPLETED` or archived until the associated pull request is confirmed merged under human authority.
+
+The awaiting-human-merge phase need not be a separate top-level status; it may be represented as a structured phase or reason within the execution record.
+
+**Verification scenario:** All five internal tasks have status `VERIFIED` but final integration review has not completed. Relay retains overall status `IN_PROGRESS` and does not report completion or request archival.
+
+#### FR-015 — Independent Task Continuation
+
+When an internal task is `BLOCKED`, the orchestrator must assess the remaining task queue and may continue other tasks only when they are eligible, their dependencies and authorization conditions are satisfied, and the blocker does not introduce shared requirements uncertainty or a broader safety concern.
+
+The overall issue execution may remain `IN_PROGRESS` while independent, safe work is available. If no work can safely proceed, Relay must preserve the checkpoint and enter the applicable blocked or awaiting-human-input condition rather than dispatching unrelated work on assumption alone.
+
+**Verification scenario:** Task 3 is blocked by an ambiguity limited to its own behavior, while Tasks 4 and 5 have satisfied prerequisites and independently verified scope. Relay may continue those tasks without treating the entire issue as terminally blocked.
+
+#### FR-016 — Evidence-Based Task Independence
+
+Before continuing a task while another task is blocked, the orchestrator must evaluate the approved dependency graph and the supporting technical evidence for independence, including relevant shared code, data contracts, and system behavior where applicable.
+
+The absence of an explicit dependency edge alone is not conclusive evidence of independence. A credible uncertain or newly discovered dependency requires focused planner-led reassessment before dispatching affected tasks. The orchestrator must preserve unaffected verified work and must not bypass unresolved safety or authorization restrictions.
+
+**Verification scenario:** Task 4 is listed as independent of blocked Task 3, but both may rely on a shared customer-data contract. Relay does not dispatch Task 4 solely because the graph lacks an edge; it requires sufficient evidence that Task 3's blocker cannot affect Task 4.
+
 ## 5. Reliability and Safety Requirements
 
 ## 6. Model Routing and Cost Optimization
