@@ -172,7 +172,7 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
   const remaining = new Set(plannedTasks.map((task) => task.taskId));
   const rootIdentity = input.planner.context;
   authorization.currentRunId = rootIdentity.runId;
-  let reviewerBlocked = false;
+  let taskBlocked = false;
 
   const advance = (taskId: string, event: TaskEvent): SimulationResult | null => {
     const transition = applyTaskTransition(states[taskId]!, event);
@@ -266,7 +266,10 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
           authorizedNextAction: block.authorizedNextAction,
         });
         if (failure) return failure;
-        return { status: "BLOCKED", states, trace };
+        remaining.delete(task.taskId);
+        taskBlocked = true;
+        progressed = true;
+        continue;
       }
       const commit = taskInput.commit;
       if (!commit) return stop("COMMIT_EVIDENCE_MISSING", "Trusted commit snapshot is missing", task.taskId);
@@ -321,7 +324,7 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
         if (failure) return failure;
         authorization.currentRepositoryCommitSha = commit.commitSha;
         remaining.delete(task.taskId);
-        reviewerBlocked = true;
+        taskBlocked = true;
         progressed = true;
         continue;
       }
@@ -361,9 +364,9 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
       progressed = true;
     }
     if (!progressed) {
-      if (reviewerBlocked) return { status: "BLOCKED", states, trace };
+      if (taskBlocked) return { status: "BLOCKED", states, trace };
       return stop("POLICY_DENIED", denials.map((reason) => reason.code).join(", "));
     }
   }
-  return { status: reviewerBlocked ? "BLOCKED" : "ALL_TASKS_VERIFIED", states, trace };
+  return { status: taskBlocked ? "BLOCKED" : "ALL_TASKS_VERIFIED", states, trace };
 }

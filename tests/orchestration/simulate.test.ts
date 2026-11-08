@@ -234,6 +234,15 @@ function blockedImplementerInput(input: SimulationInput, id = "a"): SimulatedTas
   return task;
 }
 
+function authorizedImplementerBlock(input: SimulationInput): void {
+  blockedImplementerInput(input).implementerBlock = {
+    identity: taskIdentity("a", "impl"),
+    reason: { code: "REQUIREMENTS", detail: "Approved file scope needs reassessment" },
+    evidenceReferences: ["trusted:scope-assessment"],
+    authorizedNextAction: "Request planner reassessment",
+  };
+}
+
 test("an authorized implementer block preserves trusted recovery context and validates as a checkpoint", () => {
   const input = fixture([proposedTask("a"), proposedTask("b")]);
   const task = blockedImplementerInput(input);
@@ -442,10 +451,140 @@ function independence(input: SimulationInput, candidateTaskId: string, overrides
   };
 }
 
+function implementerIndependence(
+  input: SimulationInput,
+  candidateTaskId: string,
+  repositoryCommitSha: string,
+  overrides: Partial<TrustedIndependenceAssessment> = {},
+): TrustedIndependenceAssessment {
+  return independence(input, candidateTaskId, {
+    repositoryCommitSha,
+    blockerEvidenceReference: "trusted:scope-assessment",
+    ...overrides,
+  });
+}
+
 const dispatchDenials = (trace: readonly SimulationTrace[], id: string): string[] => trace
   .filter((item): item is Extract<SimulationTrace, { type: "DISPATCH_DENIED" }> =>
     item.type === "DISPATCH_DENIED" && item.taskId === id)
   .flatMap((item) => item.reasons.map((reason) => reason.code));
+
+test("independent task continues after authorized implementer block without task commit evidence", () => {
+  const input = fixture([proposedTask("a"), proposedTask("b", ["a"]), proposedTask("c", ["b"]), proposedTask("d")]);
+  authorizedImplementerBlock(input);
+  input.authorization.currentRepositoryCommitSha = commitSha("e");
+  input.authorization.independenceAssessments = [implementerIndependence(input, "d", commitSha("e"))];
+  const result = simulateOrchestration(input);
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.failure, undefined);
+  assert.equal(taskInputs(input, "a").commit, undefined);
+  assert.equal(result.states.a?.status, "BLOCKED");
+  assert.deepEqual(result.states.a?.blockHistory, [{
+    lastValidStage: "IMPLEMENTING",
+    reason: { code: "REQUIREMENTS", detail: "Approved file scope needs reassessment" },
+    evidenceReferences: ["trusted:scope-assessment"],
+    authorizedNextAction: "Request planner reassessment",
+  }]);
+  assert.equal(result.states.a?.completedStages.length, 1);
+  assert.equal(result.states.b?.status, "PENDING");
+  assert.equal(result.states.c?.status, "PENDING");
+  assert.equal(result.states.d?.status, "VERIFIED");
+  assert.ok(dispatchDenials(result.trace, "b").includes("DEPENDENCY_NOT_VERIFIED"));
+  assert.ok(dispatchDenials(result.trace, "c").includes("DEPENDENCY_NOT_VERIFIED"));
+  assert.ok(stateTrace(result.trace).indexOf("a:BLOCKED") < stateTrace(result.trace).indexOf("d:IMPLEMENTING"));
+});
+
+test("implementer continuation requires current trusted HEAD and candidate-specific complete assessment", () => {
+  const cases: [string, boolean, (input: SimulationInput) => TrustedIndependenceAssessment[]][] = [
+    ["missing HEAD", false, (input) => [implementerIndependence(input, "b", commitSha("e"))]],
+    ["invalid HEAD", true, (input) => [implementerIndependence(input, "b", commitSha("e"))]],
+    ["missing assessment", false, () => []],
+    ["wrong candidate", false, (input) => [implementerIndependence(input, "c", commitSha("e"))]],
+    ["stale observation", true, (input) => [implementerIndependence(input, "b", commitSha("e"))]],
+    ["stale run", false, (input) => [implementerIndependence(input, "b", commitSha("e"), { runId: "old-run" })]],
+    ["stale graph", false, (input) => [implementerIndependence(input, "b", commitSha("e"), { taskGraphSnapshot: "old-graph" })]],
+    ["stale requirements", false, (input) => [implementerIndependence(input, "b", commitSha("e"), { requirementsVersion: "old-requirements" })]],
+    ["wrong occurrence", false, (input) => [implementerIndependence(input, "b", commitSha("e"), { blockIndex: 1 })]],
+    ["wrong blocker evidence", false, (input) => [implementerIndependence(input, "b", commitSha("e"), { blockerEvidenceReference: "other" })]],
+    ["incomplete technical areas", false, (input) => [implementerIndependence(input, "b", commitSha("e"), { assessedAreas: ["CODE"] })]],
+    ["uncertain impact", false, (input) => [implementerIndependence(input, "b", commitSha("e"), { impact: "UNCERTAIN" })]],
+    ["affected interface", false, (input) => [implementerIndependence(input, "b", commitSha("e"), { impact: "AFFECTED" })]],
+    ["shared scope", false, (input) => [implementerIndependence(input, "b", commitSha("e"), { blockerScope: "SHARED" })]],
+  ];
+  for (const [name, setHead, assessments] of cases) {
+    const input = fixture([proposedTask("a"), proposedTask("b"), proposedTask("c", ["a"])]);
+    authorizedImplementerBlock(input);
+    if (setHead) input.authorization.currentRepositoryCommitSha = name === "invalid HEAD" ? "not-a-sha" : commitSha("f");
+    if (!setHead && name !== "missing HEAD") input.authorization.currentRepositoryCommitSha = commitSha("e");
+    input.authorization.independenceAssessments = assessments(input);
+    const result = simulateOrchestration(input);
+    assert.equal(result.status, "BLOCKED", name);
+    assert.equal(result.failure, undefined, name);
+    assert.equal(result.states.a?.status, "BLOCKED", name);
+    assert.equal(result.states.b?.status, "PENDING", name);
+    assert.equal(result.states.c?.status, "PENDING", name);
+    assert.ok(dispatchDenials(result.trace, "b").includes(
+      ["uncertain impact", "affected interface", "shared scope"].includes(name)
+        ? "BLOCKER_IMPACT_UNRESOLVED" : "INDEPENDENCE_UNPROVEN"), name);
+  }
+});
+
+test("multiple independent tasks execute sequentially after implementer block", () => {
+  const input = fixture([proposedTask("a"), proposedTask("c"), proposedTask("b")]);
+  authorizedImplementerBlock(input);
+  input.authorization.currentRepositoryCommitSha = commitSha("e");
+  input.authorization.independenceAssessments = [
+    implementerIndependence(input, "b", commitSha("e")),
+    implementerIndependence(input, "c", commitSha("b")),
+  ];
+  const result = simulateOrchestration(input);
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.failure, undefined);
+  assert.equal(result.states.a?.status, "BLOCKED");
+  assert.equal(result.states.b?.status, "VERIFIED");
+  assert.equal(result.states.c?.status, "VERIFIED");
+  assert.ok(dispatchDenials(result.trace, "c").includes("INDEPENDENCE_UNPROVEN"));
+  const states = stateTrace(result.trace);
+  assert.ok(states.indexOf("a:BLOCKED") < states.indexOf("b:IMPLEMENTING"));
+  assert.ok(states.indexOf("b:VERIFIED") < states.indexOf("c:IMPLEMENTING"));
+  assert.equal(states.filter((state) => state.endsWith(":IMPLEMENTING")).length, 3);
+});
+
+test("invalid implementer BLOCK authorization prevents otherwise eligible continuation", () => {
+  const input = fixture([proposedTask("a"), proposedTask("b")]);
+  authorizedImplementerBlock(input);
+  taskInputs(input, "a").implementerBlock = {
+    ...taskInputs(input, "a").implementerBlock!,
+    identity: { ...taskIdentity("a", "impl"), attemptId: "stale-attempt" },
+  };
+  input.authorization.currentRepositoryCommitSha = commitSha("e");
+  input.authorization.independenceAssessments = [implementerIndependence(input, "b", commitSha("e"))];
+  const result = simulateOrchestration(input);
+  assert.equal(result.failure?.code, "IMPLEMENTER_BLOCK_DECISION_MISMATCH");
+  assert.equal(result.states.a?.status, "IMPLEMENTING");
+  assert.equal(result.states.b?.status, "PENDING");
+  assert.ok(!stateTrace(result.trace).includes("b:IMPLEMENTING"));
+});
+
+test("all blocked tasks produce a deterministic terminal result", () => {
+  const input = fixture([proposedTask("a"), proposedTask("b")]);
+  authorizedImplementerBlock(input);
+  const b = blockedImplementerInput(input, "b");
+  b.implementerBlock = {
+    identity: taskIdentity("b", "impl"),
+    reason: { code: "EVIDENCE", detail: "Task-local evidence unavailable" },
+    evidenceReferences: ["trusted:b:block"],
+    authorizedNextAction: "Request evidence",
+  };
+  input.authorization.currentRepositoryCommitSha = commitSha("e");
+  input.authorization.independenceAssessments = [implementerIndependence(input, "b", commitSha("e"))];
+  const result = simulateOrchestration(input);
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.failure, undefined);
+  assert.equal(result.states.a?.status, "BLOCKED");
+  assert.equal(result.states.b?.status, "BLOCKED");
+  assert.deepEqual(stateTrace(result.trace), ["a:IMPLEMENTING", "a:BLOCKED", "b:IMPLEMENTING", "b:BLOCKED"]);
+});
 
 test("trusted task-local independence continues while blocked history and dependencies remain intact", () => {
   const input = fixture([
