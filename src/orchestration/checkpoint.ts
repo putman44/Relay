@@ -113,7 +113,7 @@ export interface RunCheckpoint {
 
 export type CheckpointErrorCode =
   | "MISSING" | "CORRUPT" | "UNSUPPORTED_VERSION" | "INVALID_RUN_ID" | "IO_ERROR"
-  | "REVISION_CONFLICT" | "RUN_IDENTITY_MISMATCH";
+  | "REVISION_CONFLICT" | "RUN_IDENTITY_MISMATCH" | "CONTINUITY_VIOLATION";
 export interface CheckpointError {
   code: CheckpointErrorCode;
   detail: string;

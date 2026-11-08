@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
+import { applyTaskTransition, type TaskState } from "./state.js";
 import {
   CheckpointRunIdSchema,
   validateRunCheckpoint,
@@ -22,6 +23,68 @@ export interface CheckpointStore {
 
 type ReplaceFile = (temporaryPath: string, checkpointPath: string) => Promise<void>;
 const ioError = (detail: string): CheckpointError => ({ code: "IO_ERROR", detail });
+const same = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
+const prefix = <T>(before: readonly T[], after: readonly T[]): boolean =>
+  after.length >= before.length && before.every((item, index) => same(item, after[index]));
+const continuityError = (detail: string): CheckpointError => ({ code: "CONTINUITY_VIOLATION", detail });
+
+/** Check only the recorded shape of one transition; this does not authorize it. */
+function stateContinuity(before: TaskState, after: TaskState): boolean {
+  if (same(before, after)) return true;
+  if (!prefix(before.blockHistory, after.blockHistory) ||
+      !prefix(before.recoveryHistory, after.recoveryHistory) ||
+      !prefix(before.invalidatedStages, after.invalidatedStages)) return false;
+  if (before.status === "VERIFIED") return false;
+  if (before.status === "BLOCKED") {
+    if (after.blockHistory.length !== before.blockHistory.length ||
+        after.recoveryHistory.length !== before.recoveryHistory.length + 1) return false;
+    const recovery = after.recoveryHistory.at(-1)!;
+    const revalidations = recovery.stageRevalidations;
+    if (revalidations.length !== before.completedStages.length ||
+        revalidations.some((item, index) => item.stage !== before.completedStages[index]?.stage)) return false;
+    const invalidFrom = revalidations.findIndex((item) => !item.valid);
+    const retained = invalidFrom < 0 ? before.completedStages : before.completedStages.slice(0, invalidFrom);
+    const invalidated = invalidFrom < 0 ? [] : before.completedStages.slice(invalidFrom);
+    return after.status === recovery.resumedStage &&
+      after.status === (invalidFrom < 0 ? before.blockHistory.at(-1)!.lastValidStage : before.completedStages[invalidFrom]!.stage) &&
+      same(after.completedStages, retained) &&
+      same(after.invalidatedStages, [...before.invalidatedStages, ...invalidated]);
+  }
+  if (after.recoveryHistory.length !== before.recoveryHistory.length) return false;
+  if (after.status === "BLOCKED") {
+    if (after.blockHistory.length !== before.blockHistory.length + 1) return false;
+    const block = after.blockHistory.at(-1)!;
+    const result = applyTaskTransition(before, { type: "BLOCK", reason: block.reason,
+      evidenceReferences: block.evidenceReferences, authorizedNextAction: block.authorizedNextAction });
+    return result.applied && same(result.state, after);
+  }
+  if (after.blockHistory.length !== before.blockHistory.length ||
+      after.completedStages.length !== before.completedStages.length + 1) return false;
+  const completion = after.completedStages.at(-1)!;
+  const result = applyTaskTransition(before, { type: "ADVANCE", to: after.status,
+    decision: { kind: completion.decision, evidenceReferences: completion.evidenceReferences } });
+  return result.applied && same(result.state, after);
+}
+
+function checkpointContinuity(before: RunCheckpoint, after: RunCheckpoint): CheckpointError | null {
+  if (!same(before.taskGraph, after.taskGraph)) return continuityError("taskGraph changed; this store cannot authorize graph replacement");
+  if (!prefix(before.authorizationEvidenceReferences, after.authorizationEvidenceReferences))
+    return continuityError("authorizationEvidenceReferences removed or rewritten");
+  const oldExecutions = new Map(before.executionRecords.map((record) => [record.recordId, record]));
+  for (const [id, record] of oldExecutions) {
+    if (!same(record, after.executionRecords.find((item) => item.recordId === id)))
+      return continuityError(`executionRecords[${id}] removed or rewritten`);
+  }
+  for (const oldRecord of before.taskRecords) {
+    const next = after.taskRecords.find((item) => item.taskId === oldRecord.taskId);
+    if (!next) return continuityError(`taskRecords[${oldRecord.taskId}] removed`);
+    if (oldRecord.recordedCommitSha && oldRecord.recordedCommitSha !== next.recordedCommitSha)
+      return continuityError(`taskRecords[${oldRecord.taskId}].recordedCommitSha changed`);
+    if (!stateContinuity(oldRecord.state, next.state))
+      return continuityError(`taskRecords[${oldRecord.taskId}].state has unsupported transition or rewritten history`);
+  }
+  return null;
+}
 
 /** One local JSON file per run. Concurrent writers require a separate coordination layer. */
 export class FileCheckpointStore implements CheckpointStore {
@@ -102,6 +165,10 @@ export class FileCheckpointStore implements CheckpointStore {
         code: "REVISION_CONFLICT",
         detail: `Expected checkpoint revision ${expectedRevision}`,
       } };
+    }
+    if (previous.status === "RESTORED") {
+      const error = checkpointContinuity(previous.checkpoint, snapshot);
+      if (error) return { status: "ERROR", error };
     }
 
     const temporaryPath = join(this.directory, `.${snapshot.runId}.${randomUUID()}.tmp`);

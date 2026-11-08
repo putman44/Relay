@@ -332,3 +332,62 @@ test("a restored VERIFIED state remains recorded history without dispatch author
   if (!dispatch.eligible) assert.ok(dispatch.reasons.some((reason) => reason.code === "AUTHORIZATION_MISSING"));
   assert.equal(validateRunCheckpoint(restored.checkpoint).valid, true);
 });
+
+test("rejects history loss and substitution before replacing a verified checkpoint", async (t) => {
+  const directory = await tempDirectory(t);
+  const store = new FileCheckpointStore(directory);
+  const original = verifiedCheckpoint();
+  assert.equal((await store.save(original)).status, "SAVED");
+  const path = join(directory, "run-1.json");
+  const bytes = await readFile(path, "utf8");
+  const record = original.taskRecords[0]!;
+  const cases: [string, RunCheckpoint][] = [
+    ["VERIFIED regression", { ...original, revision: 2, taskRecords: [{ ...record, state: createPendingTask() }] }],
+    ["execution loss", { ...original, revision: 2, executionRecords: original.executionRecords.filter((item) => item.role !== "implementer") }],
+    ["review rewrite", { ...original, revision: 2, executionRecords: original.executionRecords.map((item) => item.role === "reviewer" ? { ...item, evidenceReferences: ["replacement"] } : item) }],
+    ["completed evidence rewrite", { ...original, revision: 2, taskRecords: [{ ...record, state: { ...record.state, completedStages: record.state.completedStages.map((item, index) => index ? item : { ...item, evidenceReferences: ["replacement"] }) } }] }],
+    ["commit substitution", { ...original, revision: 2, taskRecords: [{ ...record, recordedCommitSha: "b".repeat(40) }],
+      executionRecords: original.executionRecords.map((item) => item.role === "reviewer" ? { ...item, commitSha: "b".repeat(40) } : item) }],
+  ];
+  for (const [name, next] of cases) {
+    const result = await store.save(next);
+    assert.equal(result.status, "ERROR", name);
+    if (result.status === "ERROR") assert.equal(result.error.code, "CONTINUITY_VIOLATION", name);
+    assert.equal(await readFile(path, "utf8"), bytes, name);
+    const loaded = await store.load("run-1");
+    assert.equal(loaded.status, "RESTORED", name);
+    if (loaded.status === "RESTORED") assert.deepEqual(loaded.checkpoint, original, name);
+  }
+});
+
+test("preserves block and recovery history while permitting structurally valid recovery", async (t) => {
+  const store = new FileCheckpointStore(await tempDirectory(t));
+  let state = advance(createPendingTask(), "IMPLEMENTING", "DISPATCH_APPROVED");
+  state = advance(state, "VERIFYING", "IMPLEMENTATION_CONFIRMED");
+  const blocked = applyTaskTransition(state, { type: "BLOCK", reason: { code: "EVIDENCE", detail: "Review needed" },
+    evidenceReferences: ["block-1"], authorizedNextAction: "Revalidate" });
+  assert.equal(blocked.applied, true);
+  if (!blocked.applied) return;
+  const original = checkpoint(blocked.state);
+  assert.equal((await store.save(original)).status, "SAVED");
+  const erased = checkpoint({ ...blocked.state, blockHistory: [{ ...blocked.state.blockHistory[0]!, evidenceReferences: ["replaced"] }] }, 2);
+  const rejected = await store.save(erased);
+  assert.equal(rejected.status, "ERROR");
+  if (rejected.status === "ERROR") assert.equal(rejected.error.code, "CONTINUITY_VIOLATION");
+  const resumed = applyTaskTransition(blocked.state, { type: "RESUME", decision: {
+    blockerResolved: true, requirementsValid: true, repositoryValid: true, dependenciesValid: true, environmentAuthorized: true,
+    evidenceReferences: ["recovery-1"], stageRevalidations: blocked.state.completedStages.map((item, index) =>
+      ({ stage: item.stage, valid: index === 0, evidenceReferences: [`revalidation-${index}`] })),
+  } });
+  assert.equal(resumed.applied, true);
+  if (!resumed.applied) return;
+  assert.deepEqual(await store.save({ ...checkpoint(resumed.state, 2),
+    taskRecords: [{ taskId: task.taskId, state: resumed.state, recordedCommitSha: sha }],
+    authorizedRequirementsVersion: "requirements-v2" }),
+    { status: "SAVED", revision: 2 });
+  const truncated = { ...checkpoint(createPendingTask(), 3), taskRecords: [{ taskId: task.taskId,
+    state: createPendingTask(), recordedCommitSha: sha }] };
+  const result = await store.save(truncated);
+  assert.equal(result.status, "ERROR");
+  if (result.status === "ERROR") assert.equal(result.error.code, "CONTINUITY_VIOLATION");
+});
