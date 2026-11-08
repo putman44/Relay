@@ -7,6 +7,7 @@ import {
   type DispatchInput,
   type TaskProposal,
   type TrustedAuthorizationContext,
+  type TrustedVerificationEvidence,
 } from "../../src/orchestration/policy.js";
 import {
   applyTaskTransition,
@@ -15,12 +16,21 @@ import {
   type TaskStage,
   type TaskState,
 } from "../../src/orchestration/state.js";
+import type { ExecutionIdentity } from "../../src/orchestration/contracts.js";
 
 const task = (taskId: string, dependencies: string[] = []): TaskProposal => ({
   taskId,
   dependencies,
   fileScope: [`src/${taskId}.ts`],
   risk: "LOW",
+});
+const commitSha = (id: string): string => id.repeat(40);
+const verifiedIdentity = (taskId: string): ExecutionIdentity => ({
+  schemaVersion: 1,
+  runId: "run-1",
+  taskId,
+  attemptId: `review-${taskId}`,
+  requirementsVersion: "requirements-v1",
 });
 
 function advance(state: TaskState, to: TaskStage, kind: StageDecisionKind): TaskState {
@@ -67,6 +77,8 @@ function authorization(tasks: readonly TaskProposal[]): TrustedAuthorizationCont
     environmentAuthorized: true,
     authorizationEvidenceReferences: ["approval-1"],
     verifiedTaskEvidence: {},
+    expectedVerifiedCommitByTask: {},
+    expectedVerifiedIdentityByTask: {},
     independenceAssessments: [],
   };
 }
@@ -135,15 +147,91 @@ test("requires all direct and transitive predecessors to be verified with curren
   deniedFor(withBothVerified, "DEPENDENCY_EVIDENCE_MISSING");
 
   auth.verifiedTaskEvidence = {
-    a: { requirementsVersion: "requirements-v1", evidenceReferences: ["review-a"] },
-    b: { requirementsVersion: "requirements-v1", evidenceReferences: ["review-b"] },
+    a: { identity: verifiedIdentity("a"), requirementsVersion: "requirements-v1", commitSha: commitSha("a"), evidenceReferences: ["review-a"] },
+    b: { identity: verifiedIdentity("b"), requirementsVersion: "requirements-v1", commitSha: commitSha("b"), evidenceReferences: ["review-b"] },
   };
+  auth.expectedVerifiedCommitByTask = { a: commitSha("a"), b: commitSha("b") };
+  auth.expectedVerifiedIdentityByTask = { a: verifiedIdentity("a"), b: verifiedIdentity("b") };
   assert.deepEqual(evaluateDispatchEligibility(withBothVerified), { eligible: true, reasons: [] });
   auth.verifiedTaskEvidence = {
     ...auth.verifiedTaskEvidence,
-    a: { requirementsVersion: "requirements-v0", evidenceReferences: ["old-review"] },
+    a: { identity: verifiedIdentity("a"), requirementsVersion: "requirements-v0", commitSha: commitSha("a"), evidenceReferences: ["old-review"] },
   };
   deniedFor(withBothVerified, "DEPENDENCY_EVIDENCE_MISSING");
+});
+
+test("predecessor proof must match an independently expected verified commit", () => {
+  const request = input([task("a"), task("b", ["a"])], "b");
+  request.states = { ...request.states, a: verifiedTask() };
+  const auth = request.authorization as TrustedAuthorizationContext;
+  const matchingProof = {
+    identity: verifiedIdentity("a"),
+    requirementsVersion: "requirements-v1",
+    commitSha: commitSha("a"),
+    evidenceReferences: ["independent-review-a"],
+  };
+  auth.verifiedTaskEvidence = { a: matchingProof };
+  auth.expectedVerifiedCommitByTask = { a: commitSha("a") };
+  auth.expectedVerifiedIdentityByTask = { a: verifiedIdentity("a") };
+  assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
+
+  auth.verifiedTaskEvidence = { a: { ...matchingProof, commitSha: commitSha("b") } };
+  deniedFor(request, "DEPENDENCY_COMMIT_MISMATCH");
+  auth.verifiedTaskEvidence = { a: { ...matchingProof, commitSha: undefined as unknown as string } };
+  deniedFor(request, "DEPENDENCY_EVIDENCE_MISSING");
+  auth.verifiedTaskEvidence = { a: { ...matchingProof, commitSha: "not-a-sha" } };
+  deniedFor(request, "DEPENDENCY_EVIDENCE_MISSING");
+  auth.verifiedTaskEvidence = { a: { ...matchingProof, requirementsVersion: "requirements-v0" } };
+  deniedFor(request, "DEPENDENCY_EVIDENCE_MISSING");
+  auth.verifiedTaskEvidence = { a: matchingProof };
+  auth.expectedVerifiedCommitByTask = { a: commitSha("b") };
+  deniedFor(request, "DEPENDENCY_COMMIT_MISMATCH");
+  auth.expectedVerifiedCommitByTask = {};
+  deniedFor(request, "DEPENDENCY_EXPECTED_COMMIT_MISSING");
+  auth.expectedVerifiedCommitByTask = { a: "invalid" };
+  deniedFor(request, "DEPENDENCY_EXPECTED_COMMIT_MISSING");
+});
+
+test("same-commit predecessor proof must match its independently expected execution", () => {
+  const request = input([task("a"), task("b", ["a"])], "b");
+  request.states = { ...request.states, a: verifiedTask() };
+  const auth = request.authorization as TrustedAuthorizationContext;
+  const expected = verifiedIdentity("a");
+  const proof: TrustedVerificationEvidence = {
+    identity: expected,
+    requirementsVersion: "requirements-v1",
+    commitSha: commitSha("a"),
+    evidenceReferences: ["independent-review-a"],
+  };
+  auth.verifiedTaskEvidence = { a: proof };
+  auth.expectedVerifiedCommitByTask = { a: commitSha("a") };
+  auth.expectedVerifiedIdentityByTask = { a: expected };
+  assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
+
+  for (const identity of [
+    { ...expected, runId: "old-run" },
+    { ...expected, taskId: "other-task" },
+    { ...expected, attemptId: "old-review-attempt" },
+    { ...expected, requirementsVersion: "requirements-v0" },
+  ]) {
+    auth.verifiedTaskEvidence = { a: { ...proof, identity } };
+    deniedFor(request, "DEPENDENCY_IDENTITY_MISMATCH");
+  }
+
+  const missingIdentity: Partial<TrustedVerificationEvidence> = { ...proof };
+  delete missingIdentity.identity;
+  auth.verifiedTaskEvidence = { a: missingIdentity as TrustedVerificationEvidence };
+  deniedFor(request, "DEPENDENCY_IDENTITY_MISSING");
+  auth.verifiedTaskEvidence = { a: { ...proof, identity: { ...expected, attemptId: " " } } };
+  deniedFor(request, "DEPENDENCY_IDENTITY_MISSING");
+  auth.verifiedTaskEvidence = { a: { ...proof, identity: { ...expected, claimedAuthority: true } as ExecutionIdentity } };
+  deniedFor(request, "DEPENDENCY_IDENTITY_MISSING");
+
+  auth.verifiedTaskEvidence = { a: proof };
+  auth.expectedVerifiedIdentityByTask = {};
+  deniedFor(request, "DEPENDENCY_EXPECTED_IDENTITY_MISSING");
+  auth.expectedVerifiedIdentityByTask = { a: { ...expected, attemptId: "" } };
+  deniedFor(request, "DEPENDENCY_EXPECTED_IDENTITY_MISSING");
 });
 
 test("a blocked predecessor cannot authorize dispatch", () => {
@@ -156,15 +244,23 @@ test("a claimed verified predecessor with inconsistent stage history cannot disp
   const request = input([task("a"), task("b", ["a"])], "b");
   request.states = { ...request.states, a: { ...createPendingTask(), status: "VERIFIED" } };
   (request.authorization as TrustedAuthorizationContext).verifiedTaskEvidence = {
-    a: { requirementsVersion: "requirements-v1", evidenceReferences: ["review-a"] },
+    a: { identity: verifiedIdentity("a"), requirementsVersion: "requirements-v1", commitSha: commitSha("a"), evidenceReferences: ["review-a"] },
   };
+  (request.authorization as TrustedAuthorizationContext).expectedVerifiedCommitByTask = { a: commitSha("a") };
+  (request.authorization as TrustedAuthorizationContext).expectedVerifiedIdentityByTask = { a: verifiedIdentity("a") };
   deniedFor(request, "STATE_INCONSISTENT");
 });
 
 test("fails closed on missing or stale authorization and changed approved dependencies", () => {
   const request = input([task("a")], "a");
+  const missingExpectedCommits = { ...request.authorization };
+  delete missingExpectedCommits.expectedVerifiedCommitByTask;
+  const missingExpectedIdentities = { ...request.authorization };
+  delete missingExpectedIdentities.expectedVerifiedIdentityByTask;
   deniedFor({ ...request, authorization: undefined }, "AUTHORIZATION_MISSING");
   deniedFor({ ...request, authorization: { ...request.authorization, authorizationEvidenceReferences: [] } }, "AUTHORIZATION_MISSING");
+  deniedFor({ ...request, authorization: missingExpectedCommits }, "AUTHORIZATION_MISSING");
+  deniedFor({ ...request, authorization: missingExpectedIdentities }, "AUTHORIZATION_MISSING");
   deniedFor({ ...request, authorization: { ...request.authorization, authorizedRequirementsVersion: "  " } }, "AUTHORIZATION_MISSING");
   deniedFor({ ...request, proposedRequirementsVersion: "requirements-v0" }, "REQUIREMENTS_MISMATCH");
   deniedFor({ ...request, authorization: { ...request.authorization, currentRequirementsVersion: "requirements-v2" } }, "REQUIREMENTS_MISMATCH");

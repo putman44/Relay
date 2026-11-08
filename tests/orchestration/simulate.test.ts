@@ -127,6 +127,8 @@ function fixture(tasks = [proposedTask("a")]): SimulationInput {
     environmentAuthorized: true,
     authorizationEvidenceReferences: ["trusted-authorization"],
     verifiedTaskEvidence: {},
+    expectedVerifiedCommitByTask: {},
+    expectedVerifiedIdentityByTask: {},
     independenceAssessments: [],
   };
   return {
@@ -159,6 +161,8 @@ test("simulates one task through VERIFIED using separate trusted gates", () => {
     "a:IMPLEMENTING", "a:VERIFYING", "a:PUBLISHING", "a:IN_REVIEW", "a:VERIFIED",
   ]);
   assert.deepEqual(input.authorization.verifiedTaskEvidence, {});
+  assert.deepEqual(input.authorization.expectedVerifiedCommitByTask, {});
+  assert.deepEqual(input.authorization.expectedVerifiedIdentityByTask, {});
 });
 
 test("rejects malformed and stale planner responses before creating task state", () => {
@@ -311,6 +315,8 @@ test("dependent task waits until predecessor is verified with trusted evidence",
   const dispatchedB = result.trace.findIndex((item) => item.type === "STATE" && item.taskId === "b" && item.status === "IMPLEMENTING");
   assert.ok(denied >= 0 && denied < verifiedA && verifiedA < dispatchedB);
   assert.deepEqual(input.authorization.verifiedTaskEvidence, {});
+  assert.deepEqual(input.authorization.expectedVerifiedCommitByTask, {});
+  assert.deepEqual(input.authorization.expectedVerifiedIdentityByTask, {});
 });
 
 test("missing trusted task proof leaves the predecessor IN_REVIEW", () => {
@@ -334,4 +340,30 @@ test("mismatched trusted predecessor proof cannot release a dependent task", () 
   assert.equal(result.states.a?.status, "IN_REVIEW");
   assert.equal(result.states.b?.status, "PENDING");
   assert.ok(!stateTrace(result.trace).includes("a:VERIFIED"));
+});
+
+test("invalid trusted predecessor commit proof cannot release a dependent task", () => {
+  const input = fixture([proposedTask("b", ["a"]), proposedTask("a")]);
+  taskInputs(input, "a").verifiedTaskEvidence = {
+    ...taskInputs(input, "a").verifiedTaskEvidence!,
+    commitSha: "not-a-sha",
+  };
+  const result = simulateOrchestration(input);
+  assert.equal(result.failure?.code, "VERIFIED_TASK_EVIDENCE_MISMATCH");
+  assert.equal(result.states.a?.status, "IN_REVIEW");
+  assert.equal(result.states.b?.status, "PENDING");
+});
+
+test("missing or stale trusted predecessor execution proof cannot release a dependent task", () => {
+  for (const identity of [undefined, { ...taskIdentity("a", "review"), runId: "old-run" }]) {
+    const input = fixture([proposedTask("b", ["a"]), proposedTask("a")]);
+    taskInputs(input, "a").verifiedTaskEvidence = {
+      ...taskInputs(input, "a").verifiedTaskEvidence!,
+      identity: identity as ExecutionIdentity,
+    };
+    const result = simulateOrchestration(input);
+    assert.equal(result.failure?.code, "VERIFIED_TASK_EVIDENCE_MISMATCH");
+    assert.equal(result.states.a?.status, "IN_REVIEW");
+    assert.equal(result.states.b?.status, "PENDING");
+  }
 });

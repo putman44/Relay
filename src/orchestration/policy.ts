@@ -1,4 +1,4 @@
-import type { PlannerResponse } from "./contracts.js";
+import { AGENT_RESPONSE_SCHEMA_VERSION, type ExecutionIdentity, type PlannerResponse } from "./contracts.js";
 import { evaluateTaskTransition, taskStateConsistencyError, type TaskState } from "./state.js";
 
 type ReadyPlan = Extract<PlannerResponse, { status: "READY" }>;
@@ -78,7 +78,9 @@ export function validateTaskGraph(tasks: readonly TaskProposal[]): GraphValidati
 }
 
 export interface TrustedVerificationEvidence {
+  identity: ExecutionIdentity;
   requirementsVersion: string;
+  commitSha: string;
   evidenceReferences: readonly string[];
 }
 
@@ -108,6 +110,10 @@ export interface TrustedAuthorizationContext {
   environmentAuthorized: boolean;
   authorizationEvidenceReferences: readonly string[];
   verifiedTaskEvidence: Readonly<Record<string, TrustedVerificationEvidence>>;
+  /** Exact verified commits established independently from repository state, never agent claims. */
+  expectedVerifiedCommitByTask: Readonly<Record<string, string>>;
+  /** Expected reviewer executions established by the orchestrator, not agent responses. */
+  expectedVerifiedIdentityByTask: Readonly<Record<string, ExecutionIdentity>>;
   independenceAssessments: readonly TrustedIndependenceAssessment[];
 }
 
@@ -129,6 +135,11 @@ export interface DenialReason {
     | "CONCURRENT_IMPLEMENTATION"
     | "DEPENDENCY_NOT_VERIFIED"
     | "DEPENDENCY_EVIDENCE_MISSING"
+    | "DEPENDENCY_EXPECTED_COMMIT_MISSING"
+    | "DEPENDENCY_COMMIT_MISMATCH"
+    | "DEPENDENCY_IDENTITY_MISSING"
+    | "DEPENDENCY_EXPECTED_IDENTITY_MISSING"
+    | "DEPENDENCY_IDENTITY_MISMATCH"
     | "AUTHORIZATION_MISSING"
     | "REQUIREMENTS_MISMATCH"
     | "TASK_NOT_AUTHORIZED"
@@ -164,6 +175,24 @@ const hasReferences = (references: readonly string[] | undefined): references is
   references.every((reference) => typeof reference === "string" && reference.trim().length > 0);
 const hasText = (value: string | undefined): boolean =>
   typeof value === "string" && value.trim().length > 0;
+const isCommitSha = (value: unknown): value is string =>
+  typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
+const isExecutionIdentity = (value: unknown): value is ExecutionIdentity => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const identity = value as Record<string, unknown>;
+  const fields = ["schemaVersion", "runId", "taskId", "attemptId", "requirementsVersion"];
+  return Object.keys(identity).length === fields.length &&
+    fields.every((field) => Object.hasOwn(identity, field)) &&
+    identity.schemaVersion === AGENT_RESPONSE_SCHEMA_VERSION &&
+    [identity.runId, identity.taskId, identity.attemptId, identity.requirementsVersion]
+      .every((field) => typeof field === "string" && field.trim().length > 0 && field.trim() === field);
+};
+const sameExecutionIdentity = (actual: ExecutionIdentity, expected: ExecutionIdentity): boolean =>
+  actual.schemaVersion === expected.schemaVersion &&
+  actual.runId === expected.runId &&
+  actual.taskId === expected.taskId &&
+  actual.attemptId === expected.attemptId &&
+  actual.requirementsVersion === expected.requirementsVersion;
 
 // Scope entries are exact repository-relative files; wildcard or path traversal is not authority.
 const isExactRelativeFile = (file: string): boolean =>
@@ -227,6 +256,12 @@ export function evaluateDispatchEligibility(input: DispatchInput): DispatchEligi
       !Array.isArray(auth.authorizedTaskIds) || !auth.approvedDependenciesByTask ||
       !Array.isArray(auth.approvedFileScope) || !auth.maxAuthorizedRisk ||
       !auth.assessedRiskByTask || !auth.verifiedTaskEvidence ||
+      !auth.expectedVerifiedCommitByTask ||
+      typeof auth.expectedVerifiedCommitByTask !== "object" ||
+      Array.isArray(auth.expectedVerifiedCommitByTask) ||
+      !auth.expectedVerifiedIdentityByTask ||
+      typeof auth.expectedVerifiedIdentityByTask !== "object" ||
+      Array.isArray(auth.expectedVerifiedIdentityByTask) ||
       !Array.isArray(auth.independenceAssessments)) {
     deny("AUTHORIZATION_MISSING", "Required trusted authorization context is incomplete");
     return { eligible: false, reasons };
@@ -285,8 +320,26 @@ export function evaluateDispatchEligibility(input: DispatchInput): DispatchEligi
       }
       const proof = ownValue(auth.verifiedTaskEvidence, predecessorId);
       if (!proof || proof.requirementsVersion !== auth.currentRequirementsVersion ||
-          !hasReferences(proof.evidenceReferences)) {
+          !hasReferences(proof.evidenceReferences) || !isCommitSha(proof.commitSha)) {
         deny("DEPENDENCY_EVIDENCE_MISSING", "Current independent verification evidence is missing", predecessorId);
+      }
+      const expectedCommit = ownValue(auth.expectedVerifiedCommitByTask, predecessorId);
+      if (!isCommitSha(expectedCommit)) {
+        deny("DEPENDENCY_EXPECTED_COMMIT_MISSING", "Independently established verified commit is missing or invalid", predecessorId);
+      } else if (proof && isCommitSha(proof.commitSha) && proof.commitSha !== expectedCommit) {
+        deny("DEPENDENCY_COMMIT_MISMATCH", "Verification evidence is for a different commit", predecessorId);
+      }
+      const expectedIdentity = ownValue(auth.expectedVerifiedIdentityByTask, predecessorId);
+      if (!isExecutionIdentity(expectedIdentity) || expectedIdentity.taskId !== predecessorId ||
+          expectedIdentity.requirementsVersion !== auth.currentRequirementsVersion) {
+        deny("DEPENDENCY_EXPECTED_IDENTITY_MISSING", "Current expected predecessor execution identity is missing or invalid", predecessorId);
+      }
+      if (!proof || !isExecutionIdentity(proof.identity)) {
+        deny("DEPENDENCY_IDENTITY_MISSING", "Predecessor verification identity is missing or malformed", predecessorId);
+      } else if (isExecutionIdentity(expectedIdentity) &&
+                 (proof.identity.requirementsVersion !== proof.requirementsVersion ||
+                  !sameExecutionIdentity(proof.identity, expectedIdentity))) {
+        deny("DEPENDENCY_IDENTITY_MISMATCH", "Verification evidence belongs to a different execution", predecessorId);
       }
     }
 

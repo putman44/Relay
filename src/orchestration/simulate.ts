@@ -23,6 +23,7 @@ import {
 } from "./state.js";
 
 export interface InjectedResponse {
+  /** Attempt assigned by the simulation harness, independent of the response value. */
   attemptId: string;
   value: unknown;
 }
@@ -50,10 +51,7 @@ export interface SimulatedReviewBlock {
   authorizedNextAction: string;
 }
 
-export interface SimulatedVerifiedTaskEvidence extends TrustedVerificationEvidence {
-  identity: ExecutionIdentity;
-  commitSha: string;
-}
+export type SimulatedVerifiedTaskEvidence = TrustedVerificationEvidence;
 
 export interface SimulatedTaskInput {
   implementer: InjectedResponse;
@@ -109,12 +107,16 @@ const hasReferences = (references: readonly string[] | undefined): boolean =>
   Array.isArray(references) && references.length > 0 &&
   references.every((reference) => typeof reference === "string" && reference.trim().length > 0);
 
-const sameIdentity = (actual: ExecutionIdentity, expected: ExecutionIdentity): boolean =>
-  actual.schemaVersion === expected.schemaVersion &&
-  actual.runId === expected.runId &&
-  actual.taskId === expected.taskId &&
-  actual.attemptId === expected.attemptId &&
-  actual.requirementsVersion === expected.requirementsVersion;
+const sameIdentity = (actual: unknown, expected: ExecutionIdentity): boolean => {
+  if (!actual || typeof actual !== "object" || Array.isArray(actual)) return false;
+  const identity = actual as Partial<ExecutionIdentity>;
+  return Object.keys(identity).length === 5 &&
+    identity.schemaVersion === expected.schemaVersion &&
+    identity.runId === expected.runId &&
+    identity.taskId === expected.taskId &&
+    identity.attemptId === expected.attemptId &&
+    identity.requirementsVersion === expected.requirementsVersion;
+};
 
 const sameFiles = (actual: readonly string[], expected: readonly string[]): boolean =>
   actual.length > 0 && actual.length === expected.length &&
@@ -147,6 +149,8 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
     ...input.authorization,
     // Every planned task starts PENDING; historical proof cannot preauthorize it.
     verifiedTaskEvidence: {},
+    expectedVerifiedCommitByTask: {},
+    expectedVerifiedIdentityByTask: {},
   };
   const remaining = new Set(plannedTasks.map((task) => task.taskId));
   const rootIdentity = input.planner.context;
@@ -296,9 +300,19 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
       authorization.verifiedTaskEvidence = {
         ...authorization.verifiedTaskEvidence,
         [task.taskId]: {
+          identity: { ...proof.identity },
           requirementsVersion: proof.requirementsVersion,
+          commitSha: proof.commitSha,
           evidenceReferences: proof.evidenceReferences,
         },
+      };
+      authorization.expectedVerifiedCommitByTask = {
+        ...authorization.expectedVerifiedCommitByTask,
+        [task.taskId]: commit.commitSha,
+      };
+      authorization.expectedVerifiedIdentityByTask = {
+        ...authorization.expectedVerifiedIdentityByTask,
+        [task.taskId]: { ...reviewerIdentity },
       };
       remaining.delete(task.taskId);
       progressed = true;
