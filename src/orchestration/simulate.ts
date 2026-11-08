@@ -171,6 +171,8 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
   };
   const remaining = new Set(plannedTasks.map((task) => task.taskId));
   const rootIdentity = input.planner.context;
+  authorization.currentRunId = rootIdentity.runId;
+  let reviewerBlocked = false;
 
   const advance = (taskId: string, event: TaskEvent): SimulationResult | null => {
     const transition = applyTaskTransition(states[taskId]!, event);
@@ -317,7 +319,11 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
           authorizedNextAction: block.authorizedNextAction,
         });
         if (failure) return failure;
-        return { status: "BLOCKED", states, trace };
+        authorization.currentRepositoryCommitSha = commit.commitSha;
+        remaining.delete(task.taskId);
+        reviewerBlocked = true;
+        progressed = true;
+        continue;
       }
 
       if (reviewer.coverage.verificationChecks.some((evidence) => evidence.result !== "PASSED")) {
@@ -350,10 +356,14 @@ export function simulateOrchestration(input: SimulationInput): SimulationResult 
         ...authorization.expectedVerifiedIdentityByTask,
         [task.taskId]: { ...reviewerIdentity },
       };
+      authorization.currentRepositoryCommitSha = commit.commitSha;
       remaining.delete(task.taskId);
       progressed = true;
     }
-    if (!progressed) return stop("POLICY_DENIED", denials.map((reason) => reason.code).join(", "));
+    if (!progressed) {
+      if (reviewerBlocked) return { status: "BLOCKED", states, trace };
+      return stop("POLICY_DENIED", denials.map((reason) => reason.code).join(", "));
+    }
   }
-  return { status: "ALL_TASKS_VERIFIED", states, trace };
+  return { status: reviewerBlocked ? "BLOCKED" : "ALL_TASKS_VERIFIED", states, trace };
 }

@@ -88,13 +88,27 @@ export interface TrustedVerificationEvidence {
 export interface TrustedIndependenceAssessment {
   candidateTaskId: string;
   blockedTaskId: string;
+  /** Zero-based index of the BLOCKED event in the blocked task's blockHistory. */
+  blockIndex: number;
+  runId: string;
+  taskGraphSnapshot: string;
   requirementsVersion: string;
+  repositoryCommitSha: string;
   blockerEvidenceReference: string;
   impact: "INDEPENDENT" | "AFFECTED" | "UNCERTAIN";
   blockerScope: "TASK_LOCAL" | "SHARED" | "UNKNOWN";
-  assessedAreas: readonly ("CODE" | "DATA_CONTRACT" | "BEHAVIOR")[];
+  assessedAreas: readonly ("CODE" | "DATA_CONTRACT" | "BEHAVIOR" | "SHARED_FILES" | "INTERFACES" | "INTEGRATION")[];
   evidenceReferences: readonly string[];
 }
+
+/** Exact ordered graph and task scopes considered by a trusted assessment. */
+export const taskGraphSnapshot = (tasks: readonly TaskProposal[]): string => JSON.stringify(
+  tasks.map(({ taskId, dependencies, fileScope, risk }) => ({ taskId, dependencies, fileScope, risk })),
+);
+
+const requiredIndependenceAreas = [
+  "CODE", "DATA_CONTRACT", "BEHAVIOR", "SHARED_FILES", "INTERFACES", "INTEGRATION",
+] as const;
 
 /** All fields are supplied from trusted orchestrator state, never a planner reply. */
 export interface TrustedAuthorizationContext {
@@ -115,6 +129,9 @@ export interface TrustedAuthorizationContext {
   /** Expected reviewer executions established by the orchestrator, not agent responses. */
   expectedVerifiedIdentityByTask: Readonly<Record<string, ExecutionIdentity>>;
   independenceAssessments: readonly TrustedIndependenceAssessment[];
+  /** Current trusted context; required when dispatching past a blocked task. */
+  currentRunId?: string;
+  currentRepositoryCommitSha?: string;
 }
 
 export interface DispatchInput {
@@ -346,14 +363,22 @@ export function evaluateDispatchEligibility(input: DispatchInput): DispatchEligi
     for (const task of input.tasks) {
       if (task.taskId === candidate.taskId || ownValue(input.states, task.taskId)?.status !== "BLOCKED") continue;
       if (predecessors.has(task.taskId)) continue; // Already denied as an unverified dependency.
-      const blocker = ownValue(input.states, task.taskId)?.blockHistory.at(-1);
+      const blockHistory = ownValue(input.states, task.taskId)?.blockHistory;
+      const blocker = blockHistory?.at(-1);
       const matchingAssessments = auth.independenceAssessments.filter((item) =>
-        item.candidateTaskId === candidate.taskId && item.blockedTaskId === task.taskId);
+        item && item.candidateTaskId === candidate.taskId && item.blockedTaskId === task.taskId &&
+        item.runId === auth.currentRunId && item.repositoryCommitSha === auth.currentRepositoryCommitSha);
       const assessment = matchingAssessments[0];
-      if (matchingAssessments.length !== 1 || !assessment || !blocker ||
+      if (matchingAssessments.length !== 1 || !assessment || !blocker || !blockHistory ||
+          !Number.isSafeInteger(assessment.blockIndex) ||
+          assessment.blockIndex !== blockHistory.length - 1 ||
+          !hasText(auth.currentRunId) || !isCommitSha(auth.currentRepositoryCommitSha) ||
+          assessment.taskGraphSnapshot !== taskGraphSnapshot(input.tasks) ||
           assessment.requirementsVersion !== auth.currentRequirementsVersion ||
           !blocker.evidenceReferences.includes(assessment.blockerEvidenceReference) ||
-          assessment.assessedAreas.length === 0 ||
+          !Array.isArray(assessment.assessedAreas) ||
+          assessment.assessedAreas.length !== requiredIndependenceAreas.length ||
+          !requiredIndependenceAreas.every((area) => assessment.assessedAreas.includes(area)) ||
           !hasReferences(assessment.evidenceReferences)) {
         deny("INDEPENDENCE_UNPROVEN", "Current evidence of independence from blocked task is missing", task.taskId);
       } else if (assessment.impact !== "INDEPENDENT" || assessment.blockerScope !== "TASK_LOCAL") {

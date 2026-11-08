@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   evaluateDispatchEligibility,
+  taskGraphSnapshot,
   validateTaskGraph,
   type DenialReason,
   type DispatchInput,
@@ -312,13 +313,19 @@ test("blocked tasks require anchored, current technical independence evidence", 
   auth.independenceAssessments = [{
     candidateTaskId: "candidate",
     blockedTaskId: "blocked",
+    blockIndex: 0,
+    runId: "run-1",
+    taskGraphSnapshot: taskGraphSnapshot(request.tasks),
     requirementsVersion: "requirements-v1",
+    repositoryCommitSha: commitSha("b"),
     blockerEvidenceReference: "blocker-evidence",
     impact: "INDEPENDENT",
     blockerScope: "TASK_LOCAL",
-    assessedAreas: ["CODE", "DATA_CONTRACT", "BEHAVIOR"],
+    assessedAreas: ["CODE", "DATA_CONTRACT", "BEHAVIOR", "SHARED_FILES", "INTERFACES", "INTEGRATION"],
     evidenceReferences: ["shared-contract-analysis"],
   }];
+  auth.currentRunId = "run-1";
+  auth.currentRepositoryCommitSha = commitSha("b");
   assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
   const assessment = auth.independenceAssessments[0]!;
   auth.independenceAssessments = [{ ...assessment, blockerEvidenceReference: "stale-blocker" }];
@@ -328,6 +335,71 @@ test("blocked tasks require anchored, current technical independence evidence", 
   auth.independenceAssessments = [{ ...assessment, blockerScope: "SHARED" }];
   deniedFor(request, "BLOCKER_IMPACT_UNRESOLVED");
   auth.independenceAssessments = [assessment, { ...assessment, impact: "AFFECTED" }];
+  deniedFor(request, "INDEPENDENCE_UNPROVEN");
+  auth.independenceAssessments = [{ ...assessment, runId: "old-run" }];
+  deniedFor(request, "INDEPENDENCE_UNPROVEN");
+  auth.independenceAssessments = [{ ...assessment, taskGraphSnapshot: "old-graph" }];
+  deniedFor(request, "INDEPENDENCE_UNPROVEN");
+  auth.independenceAssessments = [{ ...assessment, repositoryCommitSha: commitSha("a") }];
+  deniedFor(request, "INDEPENDENCE_UNPROVEN");
+  auth.independenceAssessments = [{ ...assessment, assessedAreas: ["CODE"] }];
+  deniedFor(request, "INDEPENDENCE_UNPROVEN");
+});
+
+test("independence assessment is bound to the current block even when evidence and commit repeat", () => {
+  const request = input([task("blocked"), task("candidate")], "candidate");
+  request.states = { ...request.states, blocked: blockedTask() };
+  const auth = request.authorization as TrustedAuthorizationContext;
+  const assessment = {
+    candidateTaskId: "candidate",
+    blockedTaskId: "blocked",
+    blockIndex: 0,
+    runId: "run-1",
+    taskGraphSnapshot: taskGraphSnapshot(request.tasks),
+    requirementsVersion: "requirements-v1",
+    repositoryCommitSha: commitSha("b"),
+    blockerEvidenceReference: "blocker-evidence",
+    impact: "INDEPENDENT" as const,
+    blockerScope: "TASK_LOCAL" as const,
+    assessedAreas: ["CODE", "DATA_CONTRACT", "BEHAVIOR", "SHARED_FILES", "INTERFACES", "INTEGRATION"] as const,
+    evidenceReferences: ["shared-contract-analysis"],
+  };
+  auth.currentRunId = "run-1";
+  auth.currentRepositoryCommitSha = commitSha("b");
+  auth.independenceAssessments = [assessment];
+  assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
+
+  const resumed = applyTaskTransition(request.states.blocked!, {
+    type: "RESUME",
+    decision: {
+      blockerResolved: true, requirementsValid: true, repositoryValid: true,
+      dependenciesValid: true, environmentAuthorized: true,
+      evidenceReferences: ["trusted-resume"], stageRevalidations: [],
+    },
+  });
+  assert.equal(resumed.applied, true);
+  if (!resumed.applied) return;
+  const blockedAgain = applyTaskTransition(resumed.state, {
+    type: "BLOCK",
+    reason: { code: "EVIDENCE", detail: "Task-local question remains" },
+    evidenceReferences: ["blocker-evidence"],
+    authorizedNextAction: "Investigate",
+  });
+  assert.equal(blockedAgain.applied, true);
+  if (!blockedAgain.applied) return;
+  assert.equal(blockedAgain.state.blockHistory.length, 2);
+  assert.equal(blockedAgain.state.recoveryHistory.length, 1);
+  request.states = { ...request.states, blocked: blockedAgain.state };
+  deniedFor(request, "INDEPENDENCE_UNPROVEN");
+
+  auth.independenceAssessments = [{ ...assessment, blockIndex: 1 }];
+  assert.deepEqual(evaluateDispatchEligibility(request), { eligible: true, reasons: [] });
+  for (const blockIndex of [undefined, null, -1, 0.5, NaN, "1", 2]) {
+    auth.independenceAssessments = [{ ...assessment, blockIndex: blockIndex as number }];
+    deniedFor(request, "INDEPENDENCE_UNPROVEN");
+  }
+  const { blockIndex: _removed, ...missingIndex } = assessment;
+  auth.independenceAssessments = [missingIndex as typeof assessment];
   deniedFor(request, "INDEPENDENCE_UNPROVEN");
 });
 

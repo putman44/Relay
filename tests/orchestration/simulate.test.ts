@@ -8,7 +8,7 @@ import {
 } from "../../src/orchestration/simulate.js";
 import type { ExecutionIdentity } from "../../src/orchestration/contracts.js";
 import { validateRunCheckpoint } from "../../src/orchestration/checkpoint.js";
-import type { TaskProposal, TrustedAuthorizationContext } from "../../src/orchestration/policy.js";
+import { taskGraphSnapshot, type TaskProposal, type TrustedAuthorizationContext, type TrustedIndependenceAssessment } from "../../src/orchestration/policy.js";
 import type { StageDecisionKind } from "../../src/orchestration/state.js";
 
 const plannerIdentity: ExecutionIdentity = {
@@ -398,6 +398,136 @@ test("a BLOCKED reviewer produces a blocked task only with a trusted block decis
   assert.equal(result.states.a?.status, "BLOCKED");
   assert.equal(result.states.a?.blockHistory.at(-1)?.lastValidStage, "IN_REVIEW");
   assert.ok(!stateTrace(result.trace).includes("a:VERIFIED"));
+});
+
+function blockedReviewerInput(input: SimulationInput, id = "a"): void {
+  const review = taskIdentity(id, "review");
+  const sha = commitSha(id);
+  const task = taskInputs(input, id);
+  task.reviewer.value = {
+    ...review,
+    role: "reviewer",
+    status: "BLOCKED",
+    commitSha: sha,
+    coverage: {
+      filesExamined: [`src/${id}.ts`], requirementsEvaluated: ["requirements-v1"],
+      behaviorsEvaluated: [], verificationChecks: [], limitations: ["Unresolved task-local concern"],
+    },
+    reasons: ["UNVERIFIED_TECHNICAL_CONCERN"],
+    findings: [{
+      findingId: `finding-${id}`, classification: "UNVERIFIED_TECHNICAL_CONCERN", severity: "HIGH",
+      summary: "Task-local concern", technicalEvidence: [evidence(review, "finding", sha)],
+      recommendedAction: "Investigate",
+    }],
+    evidenceReferences: [evidence(review, "review-block", sha)],
+    recommendedNextActions: ["Investigate"],
+  };
+  task.reviewBlock = {
+    identity: review, commitSha: sha,
+    reason: { code: "REVIEW", detail: "Task-local concern remains" },
+    evidenceReferences: [`trusted-review-block:${id}`],
+    authorizedNextAction: "Investigate task-local concern",
+  };
+}
+
+function independence(input: SimulationInput, candidateTaskId: string, overrides: Partial<TrustedIndependenceAssessment> = {}): TrustedIndependenceAssessment {
+  const tasks = (input.planner.value as { plan: { tasks: TaskProposal[] } }).plan.tasks;
+  return {
+    candidateTaskId, blockedTaskId: "a", blockIndex: 0, runId: plannerIdentity.runId,
+    taskGraphSnapshot: taskGraphSnapshot(tasks), requirementsVersion: plannerIdentity.requirementsVersion,
+    repositoryCommitSha: commitSha("a"), blockerEvidenceReference: "trusted-review-block:a",
+    impact: "INDEPENDENT", blockerScope: "TASK_LOCAL",
+    assessedAreas: ["CODE", "DATA_CONTRACT", "BEHAVIOR", "SHARED_FILES", "INTERFACES", "INTEGRATION"],
+    evidenceReferences: [`trusted-impact:${candidateTaskId}`], ...overrides,
+  };
+}
+
+const dispatchDenials = (trace: readonly SimulationTrace[], id: string): string[] => trace
+  .filter((item): item is Extract<SimulationTrace, { type: "DISPATCH_DENIED" }> =>
+    item.type === "DISPATCH_DENIED" && item.taskId === id)
+  .flatMap((item) => item.reasons.map((reason) => reason.code));
+
+test("trusted task-local independence continues while blocked history and dependencies remain intact", () => {
+  const input = fixture([
+    proposedTask("a"), proposedTask("b", ["a"]), proposedTask("c", ["b"]), proposedTask("d"),
+  ]);
+  blockedReviewerInput(input);
+  input.authorization.independenceAssessments = [
+    independence(input, "b"), independence(input, "c"), independence(input, "d"),
+  ];
+  const result = simulateOrchestration(input);
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.failure, undefined);
+  assert.equal(result.states.a?.status, "BLOCKED");
+  assert.deepEqual(result.states.a?.blockHistory, [{
+    lastValidStage: "IN_REVIEW", reason: { code: "REVIEW", detail: "Task-local concern remains" },
+    evidenceReferences: ["trusted-review-block:a"], authorizedNextAction: "Investigate task-local concern",
+  }]);
+  assert.equal(result.states.a?.completedStages.length, 4);
+  assert.deepEqual(result.states.a?.recoveryHistory, []);
+  assert.equal(result.states.b?.status, "PENDING");
+  assert.equal(result.states.c?.status, "PENDING");
+  assert.equal(result.states.d?.status, "VERIFIED");
+  assert.ok(dispatchDenials(result.trace, "b").includes("DEPENDENCY_NOT_VERIFIED"));
+  assert.ok(dispatchDenials(result.trace, "c").includes("DEPENDENCY_NOT_VERIFIED"));
+  assert.ok(stateTrace(result.trace).indexOf("a:BLOCKED") < stateTrace(result.trace).indexOf("d:IMPLEMENTING"));
+  assert.ok(!stateTrace(result.trace).includes("a:VERIFIED"));
+});
+
+test("missing, stale, mismatched, and uncertain assessments preserve pending tasks", () => {
+  const cases: [string, (input: SimulationInput) => TrustedIndependenceAssessment[]][] = [
+    ["missing", () => []],
+    ["wrong candidate", (input) => [independence(input, "c")]],
+    ["wrong run", (input) => [independence(input, "b", { runId: "old-run" })]],
+    ["wrong graph", (input) => [independence(input, "b", { taskGraphSnapshot: "old-graph" })]],
+    ["wrong requirements", (input) => [independence(input, "b", { requirementsVersion: "old-requirements" })]],
+    ["stale repository", (input) => [independence(input, "b", { repositoryCommitSha: commitSha("z") })]],
+    ["wrong blocker", (input) => [independence(input, "b", { blockerEvidenceReference: "other-blocker" })]],
+    ["wrong block index", (input) => [independence(input, "b", { blockIndex: 1 })]],
+    ["invalid block index", (input) => [independence(input, "b", { blockIndex: -1 })]],
+    ["missing block index", (input) => {
+      const assessment = independence(input, "b");
+      delete (assessment as Partial<TrustedIndependenceAssessment>).blockIndex;
+      return [assessment];
+    }],
+    ["incomplete coverage", (input) => [independence(input, "b", { assessedAreas: ["CODE"] })]],
+    ["uncertain impact", (input) => [independence(input, "b", { impact: "UNCERTAIN" })]],
+    ["shared impact", (input) => [independence(input, "b", { blockerScope: "SHARED" })]],
+    ["affected interface", (input) => [independence(input, "b", { impact: "AFFECTED" })]],
+    ["contradictory", (input) => [independence(input, "b"), independence(input, "b", { impact: "AFFECTED" })]],
+  ];
+  for (const [name, assessments] of cases) {
+    const input = fixture([proposedTask("a"), proposedTask("b"), proposedTask("c", ["a"])]);
+    blockedReviewerInput(input);
+    input.authorization.independenceAssessments = assessments(input);
+    const result = simulateOrchestration(input);
+    assert.equal(result.status, "BLOCKED", name);
+    assert.equal(result.failure, undefined, name);
+    assert.equal(result.states.a?.status, "BLOCKED", name);
+    assert.equal(result.states.b?.status, "PENDING", name);
+    assert.equal(result.states.c?.status, "PENDING", name);
+    assert.equal(stateTrace(result.trace).length, 5, name);
+    assert.ok(dispatchDenials(result.trace, "b").includes(
+      name === "uncertain impact" || name === "shared impact" || name === "affected interface"
+        ? "BLOCKER_IMPACT_UNRESOLVED" : "INDEPENDENCE_UNPROVEN"), name);
+  }
+});
+
+test("multiple independent tasks continue sequentially with repository-fresh assessments", () => {
+  const input = fixture([proposedTask("a"), proposedTask("c"), proposedTask("b")]);
+  blockedReviewerInput(input);
+  input.authorization.independenceAssessments = [
+    independence(input, "b"),
+    independence(input, "c", { repositoryCommitSha: commitSha("b") }),
+  ];
+  const result = simulateOrchestration(input);
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.states.b?.status, "VERIFIED");
+  assert.equal(result.states.c?.status, "VERIFIED");
+  assert.ok(dispatchDenials(result.trace, "c").includes("INDEPENDENCE_UNPROVEN"));
+  const states = stateTrace(result.trace);
+  assert.ok(states.indexOf("b:VERIFIED") < states.indexOf("c:IMPLEMENTING"));
+  assert.equal(states.filter((state) => state.endsWith(":IMPLEMENTING")).length, 3);
 });
 
 test("dependent task waits until predecessor is verified with trusted evidence", () => {
