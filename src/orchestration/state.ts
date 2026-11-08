@@ -126,7 +126,7 @@ const hasReferences = (references: readonly string[]): boolean =>
   references.length > 0 && references.every((reference) => reference.trim().length > 0);
 
 /** Validate current-stage evidence; invalidated records are retained only as history. */
-function stateConsistencyError(state: TaskState): string | null {
+export function taskStateConsistencyError(state: TaskState): string | null {
   const currentStage = state.status === "BLOCKED"
     ? state.blockHistory.at(-1)?.lastValidStage
     : state.status;
@@ -167,7 +167,7 @@ export function evaluateTaskTransition(
   state: TaskState,
   event: TaskEvent,
 ): TransitionEvaluation {
-  const consistencyError = stateConsistencyError(state);
+  const consistencyError = taskStateConsistencyError(state);
   if (consistencyError) return { permitted: false, reason: consistencyError };
 
   if (event.type === "ADVANCE") {
