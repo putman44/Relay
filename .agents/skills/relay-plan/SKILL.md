@@ -67,7 +67,53 @@ Do not convert an assumption into a requirement. A material unresolved decision 
 
 ## Produce the plan
 
-Every plan must use these sections in this order:
+Select exactly one output mode per invocation. Use COMPACT by default, including for human-facing invocations. Select HANDOFF only when the invocation explicitly includes `Output mode: HANDOFF`. Emit only the selected report; never emit both modes.
+
+Both modes use **Plan status** with exactly `READY` or `BLOCKED` and preserve every unresolved human decision, meaningful risk, and safety conflict. Apply the same blocking rules below in either mode.
+
+### COMPACT (default)
+
+Target no more than 200 words. This is a soft target: never omit or truncate blockers, unresolved human decisions, meaningful risks, or safety conflicts to meet it. Use only these seven sections, in order:
+
+1. **Issue**
+   - Issue number and title.
+2. **Plan status**
+   - Exactly `READY` or `BLOCKED`.
+3. **Implementation guidance**
+4. **Affected files**
+5. **Verification**
+6. **Human decisions required**
+7. **Risks**
+
+Use `None` for Human decisions required or Risks when none exist. Do not repeat the issue body, general repository rules, or standard Relay safety boilerplate. Name an applicable safety conflict when it affects this plan.
+
+Representative COMPACT READY output:
+
+```text
+**Issue**: #123 — Add a read-only summary
+**Plan status**: READY
+**Implementation guidance**: Add the summary using the existing query path.
+**Affected files**: src/summary.ts; tests/summary.test.ts
+**Verification**: Focused summary test; npm run typecheck.
+**Human decisions required**: None
+**Risks**: None
+```
+
+Representative COMPACT BLOCKED output:
+
+```text
+**Issue**: #124 — Choose a retention period
+**Plan status**: BLOCKED
+**Implementation guidance**: Hold implementation until the retention period is approved.
+**Affected files**: None determined.
+**Verification**: Determine after the decision.
+**Human decisions required**: Approve the retention period; the issue specifies none.
+**Risks**: Guessing a period could delete data prematurely.
+```
+
+### HANDOFF (explicit `Output mode: HANDOFF` only)
+
+Preserve the complete 12-section handoff contract in this order:
 
 1. **Issue**
    - Issue number and title.
@@ -88,6 +134,23 @@ Every plan must use these sections in this order:
 11. **Out of scope**
 12. **Risks and assumptions**
 
+Representative HANDOFF output (each heading is required even when its value is `None`):
+
+```text
+**Issue**: #123 — Add a read-only summary
+**Plan status**: READY
+**Goal**: Show a summary without changing durable state.
+**Approved scope**: The issue's read-only summary request.
+**Relevant repository evidence**: src/summary.ts; tests/summary.test.ts.
+**Affected areas**: src/summary.ts; tests/summary.test.ts.
+**Implementation steps**: Add the query-backed summary and focused test.
+**Verification plan**: Run the focused test and npm run typecheck.
+**Relay safety constraints**: Keep the summary read-only.
+**Human decisions required**: None
+**Out of scope**: Mutating summary data.
+**Risks and assumptions**: None
+```
+
 Use `READY` only when the issue and repository evidence let a later implementer proceed without inventing product requirements. Use `BLOCKED` when a material product, architecture, recovery, authorization, or safety decision is unresolved. A blocked plan may record evidence and the exact decision needed, but must not prescribe a guessed implementation.
 
 The authority order is:
@@ -100,8 +163,8 @@ relay-plan guidance
 actual repository rules and invariants
 ```
 
-The plan is complete when every required section is present, every implementation step is supported by issue scope and repository evidence, every applicable safety boundary is named, and every material uncertainty is either resolved by evidence or listed as a blocking human decision.
+The plan is complete when every section required by the selected mode is present, implementation guidance is supported by issue scope and repository evidence, applicable safety boundaries are respected, and every material uncertainty is either resolved by evidence or listed as a blocking human decision. HANDOFF must name every applicable safety boundary and provide repository-supported affected areas precise enough to derive an exact changed-path allowlist.
 
 ## Stop after handoff
 
-Return the structured plan and stop. The user must invoke `relay-implement` separately for implementation and `relay-review` separately for independent review. Neither role depends on trusting planner conclusions; each reads the originating issue and current repository evidence for itself.
+Return the selected plan and stop. The user must invoke `relay-implement` separately for implementation and `relay-review` separately for independent review. Neither role depends on trusting planner conclusions; each reads the originating issue and current repository evidence for itself.

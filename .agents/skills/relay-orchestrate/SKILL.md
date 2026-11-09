@@ -83,7 +83,7 @@ Preflight and planning must remain non-mutating until all preceding gates pass. 
 
 ## State 2: planning gate
 
-Dispatch a fresh planner context using the configured planner role. Give it the same issue number and explicitly invoke `relay-plan` for the same issue.
+Dispatch a fresh planner context using the configured planner role. Give it the same issue number and explicitly invoke `relay-plan` for the same issue with `Output mode: HANDOFF`. Require only the complete HANDOFF report.
 
 Supply `<canonical-host>`, `<canonical-repository>`, and `<canonical-gh-repository>` as recorded orchestration state and require every planner GitHub read to bind to them explicitly. A planner-reported repository identity mismatch is a STOP condition.
 
