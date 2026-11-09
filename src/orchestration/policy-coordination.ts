@@ -9,17 +9,21 @@ const policyPath = ".agents/relay-orchestration-policy.json";
 const commitPattern = /^[0-9a-f]{40}$/;
 const token = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.trim() === value && !/[\x00-\x1f]/.test(value);
 const roles = ["planner", "implementer", "reviewer"] as const;
-const requiredSettings = {
-  planner: { model: "gpt-6.1-sol", reasoningEffort: "medium" },
-  implementer: { model: "gpt-6.1-sol", reasoningEffort: "high" },
-  reviewer: { model: "gpt-6.1-sol", reasoningEffort: "high" },
-} as const;
+type RoleSettings = Readonly<Record<typeof roles[number], Readonly<{ model: string; reasoningEffort: string }>>>;
+export interface CanonicalRepository { readonly canonicalHost: string; readonly canonicalRepository: string }
+
+function repositoryIdentity(repository: string): CanonicalRepository {
+  const origin = execFileSync("git", ["config", "--get", "remote.origin.url"], { cwd: resolve(repository), encoding: "utf8" }).trim();
+  const match = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(origin);
+  if (!match) throw new Error("Canonical GitHub origin is unavailable");
+  return Object.freeze({ canonicalHost: "github.com", canonicalRepository: match[1]! });
+}
 
 export interface PolicyIdentity {
   encodingVersion: 1;
   policyDigest: string;
   sourceCommit: string;
-  roles: typeof requiredSettings;
+  roles: RoleSettings;
 }
 
 export interface PolicyBinding {
@@ -28,38 +32,42 @@ export interface PolicyBinding {
   requirementsVersion: string;
 }
 
-function exactPolicy(value: unknown): typeof requiredSettings {
+function exactPolicy(value: unknown): RoleSettings {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Malformed role policy");
   const policy = value as Record<string, unknown>;
   if (Object.keys(policy).sort().join() !== "roles,schemaVersion" || policy.schemaVersion !== 1 ||
       !policy.roles || typeof policy.roles !== "object" || Array.isArray(policy.roles)) throw new Error("Malformed role policy");
   const configured = policy.roles as Record<string, unknown>;
   if (Object.keys(configured).sort().join() !== [...roles].sort().join()) throw new Error("Malformed role policy");
+  const settings = {} as Record<typeof roles[number], Readonly<{ model: string; reasoningEffort: string }>>;
   for (const role of roles) {
     const setting = configured[role];
     if (!setting || typeof setting !== "object" || Array.isArray(setting) ||
         Object.keys(setting).sort().join() !== "model,reasoningEffort" ||
-        (setting as Record<string, unknown>).model !== requiredSettings[role].model ||
-        (setting as Record<string, unknown>).reasoningEffort !== requiredSettings[role].reasoningEffort) {
-      throw new Error("Role policy does not match the approved exact settings");
+        !token((setting as Record<string, unknown>).model) ||
+        !token((setting as Record<string, unknown>).reasoningEffort)) {
+      throw new Error("Malformed role policy settings");
     }
+    const value = setting as { model: string; reasoningEffort: string };
+    settings[role] = Object.freeze({ model: value.model, reasoningEffort: value.reasoningEffort });
   }
-  return requiredSettings;
+  return Object.freeze(settings);
 }
 
-const encoding = (settings: typeof requiredSettings) => JSON.stringify([1, 1, ...roles.map((role) =>
+const encoding = (settings: RoleSettings) => JSON.stringify([1, 1, ...roles.map((role) =>
   [role, settings[role].model, settings[role].reasoningEffort])]);
 
 /** Read only a full, verified commit object from the trusted checkout. */
 export function policyFromCommit(repository: string, sourceCommit: string): PolicyIdentity {
   if (!commitPattern.test(sourceCommit)) throw new Error("A full approved policy commit is required");
   const cwd = resolve(repository);
+  repositoryIdentity(cwd);
   const resolved = execFileSync("git", ["rev-parse", "--verify", `${sourceCommit}^{commit}`], { cwd, encoding: "utf8" }).trim();
   if (resolved !== sourceCommit) throw new Error("Policy source is not the verified commit");
   const source = execFileSync("git", ["show", `${sourceCommit}:${policyPath}`], { cwd, encoding: "utf8" });
   const settings = exactPolicy(JSON.parse(source));
   return Object.freeze({ encodingVersion: 1, policyDigest: createHash("sha256").update(encoding(settings)).digest("hex"),
-    sourceCommit, roles: requiredSettings });
+    sourceCommit, roles: settings });
 }
 
 export function validatePolicyBinding(value: unknown): asserts value is PolicyBinding {
@@ -79,7 +87,7 @@ export interface PolicyGate {
 }
 
 export interface PolicyCoordinator {
-  beginAttempt(approvedCommit: string, approvalEvidence: string): Promise<PolicyGate>;
+  beginAttempt(approvedCommit: string, approvalEvidence: string, identity: CanonicalRepository): Promise<PolicyGate>;
 }
 
 /** One local gate serializes policy promotion with reservation, capability checks and dispatch. */
@@ -126,29 +134,39 @@ export class PolicyCoordination implements PolicyCoordinator {
     } };
   }
 
-  private async active(): Promise<{ version: 1; policyDigest: string; sourceCommit: string; approvalEvidence: string }> {
+  private async active(): Promise<{ version: 1; policyDigest: string; sourceCommit: string; approvalEvidence: string } & CanonicalRepository> {
     {
       const value: unknown = JSON.parse(await this.readPrivate(this.activePath));
       if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Corrupt active policy reference");
       const record = value as Record<string, unknown>;
-      if (Object.keys(record).sort().join() !== "approvalEvidence,policyDigest,sourceCommit,version" || record.version !== 1 ||
+      if (Object.keys(record).sort().join() !== "approvalEvidence,canonicalHost,canonicalRepository,policyDigest,sourceCommit,version" || record.version !== 1 ||
           typeof record.policyDigest !== "string" || !/^[0-9a-f]{64}$/.test(record.policyDigest) ||
-          typeof record.sourceCommit !== "string" || !commitPattern.test(record.sourceCommit) || !token(record.approvalEvidence)) {
+          typeof record.sourceCommit !== "string" || !commitPattern.test(record.sourceCommit) || !token(record.approvalEvidence) ||
+          record.canonicalHost !== "github.com" || !token(record.canonicalRepository) ||
+          !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(record.canonicalRepository)) {
         throw new Error("Corrupt active policy reference");
       }
-      return record as { version: 1; policyDigest: string; sourceCommit: string; approvalEvidence: string };
+      return record as unknown as { version: 1; policyDigest: string; sourceCommit: string; approvalEvidence: string } & CanonicalRepository;
     }
   }
 
   async promote(sourceCommit: string, approvalEvidence: string): Promise<PolicyIdentity> {
     if (!token(approvalEvidence)) throw new Error("Explicit policy promotion approval evidence is required");
     const policy = policyFromCommit(this.repository, sourceCommit);
+    const identity = repositoryIdentity(this.repository);
     const working = await readFile(join(this.repository, policyPath), "utf8");
     const committed = execFileSync("git", ["show", `${sourceCommit}:${policyPath}`], { cwd: this.repository, encoding: "utf8" });
     if (working !== committed) throw new Error("Working policy differs from approved commit");
     const gate = await this.acquire();
     let mutationStarted = false;
     try {
+      try {
+        const active = await this.active();
+        if (active.canonicalHost !== identity.canonicalHost || active.canonicalRepository !== identity.canonicalRepository)
+          throw new Error("Active policy belongs to another repository");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
       for (const name of await readdir(this.directory)) {
         if (!name.endsWith(".reservation.json")) continue;
         const digest = name.slice(0, -".reservation.json".length);
@@ -159,7 +177,7 @@ export class PolicyCoordination implements PolicyCoordinator {
         if (Object.keys(proof).sort().join() !== "digest,outcome,version" || proof.version !== 1 || proof.digest !== digest ||
             !["NO_DISPATCH", "VALIDATED_RESPONSE"].includes(String(proof.outcome))) throw new Error("Attempt completion is unproven");
       }
-      const record = JSON.stringify({ version: 1, policyDigest: policy.policyDigest, sourceCommit, approvalEvidence }) + "\n";
+      const record = JSON.stringify({ version: 1, ...identity, policyDigest: policy.policyDigest, sourceCommit, approvalEvidence }) + "\n";
       const temporary = join(this.directory, `.active-policy-${gate.id}.tmp`);
       mutationStarted = true;
       const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
@@ -176,15 +194,23 @@ export class PolicyCoordination implements PolicyCoordinator {
     }
   }
 
-  async beginAttempt(approvedCommit: string, approvalEvidence: string): Promise<PolicyGate> {
+  async beginAttempt(approvedCommit: string, approvalEvidence: string, identity: CanonicalRepository): Promise<PolicyGate> {
     if (!token(approvalEvidence)) throw new Error("Explicit policy approval evidence is required");
     const expected = policyFromCommit(this.repository, approvedCommit);
+    const repository = repositoryIdentity(this.repository);
+    if (identity.canonicalHost !== repository.canonicalHost || identity.canonicalRepository !== repository.canonicalRepository)
+      throw new Error("Attempt repository differs from canonical GitHub origin");
     const gate = await this.acquire();
     const assertCurrent = async () => {
       await gate.verify();
       await this.reservation.verifyDirectory();
+      const currentRepository = repositoryIdentity(this.repository);
+      if (currentRepository.canonicalHost !== repository.canonicalHost ||
+          currentRepository.canonicalRepository !== repository.canonicalRepository)
+        throw new Error("Canonical GitHub origin changed");
       const active = await this.active();
-      if (active.policyDigest !== expected.policyDigest || active.sourceCommit !== expected.sourceCommit ||
+      if (active.canonicalHost !== repository.canonicalHost || active.canonicalRepository !== repository.canonicalRepository ||
+          active.policyDigest !== expected.policyDigest || active.sourceCommit !== expected.sourceCommit ||
           active.approvalEvidence !== approvalEvidence) throw new Error("Active policy identity mismatch");
       const source = await readFile(join(this.repository, policyPath), "utf8");
       exactPolicy(JSON.parse(source));

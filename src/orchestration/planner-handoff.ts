@@ -130,7 +130,8 @@ export function createPlannerHandoff(host?: PlannerHost, reservation?: TrustedAt
     attempted.add(key);
     let gate: PolicyGate;
     try {
-      gate = await coordination.beginAttempt(trusted.approvedPolicyCommit, trusted.approvedPolicyEvidence);
+      gate = await coordination.beginAttempt(trusted.approvedPolicyCommit, trusted.approvedPolicyEvidence,
+        { canonicalHost: trusted.canonicalHost, canonicalRepository: trusted.canonicalRepository });
     } catch {
       return stop("POLICY_IDENTITY_MISMATCH", "Approved active policy or coordination gate is unavailable; reconcile any held gate");
     }

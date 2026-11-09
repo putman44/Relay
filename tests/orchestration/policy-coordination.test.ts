@@ -21,6 +21,7 @@ async function fixture(t: TestContext) {
   await mkdir(directory, { mode: 0o700 });
   await writeFile(join(repository, ".agents/relay-orchestration-policy.json"), policyText);
   git(repository, "init", "-q");
+  git(repository, "remote", "add", "origin", "https://github.com/putman44/Relay.git");
   git(repository, "add", ".agents/relay-orchestration-policy.json");
   git(repository, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "approved policy");
   const commit = git(repository, "rev-parse", "HEAD");
@@ -66,7 +67,7 @@ test("promotion before an attempt binds a verified commit and a version 2 claim"
   const promoted = await f.coordination.promote(later, "explicit-later-approval");
   assert.equal(promoted.policyDigest, f.approved.policyDigest);
   assert.equal(promoted.sourceCommit, later);
-  const gate = await f.coordination.beginAttempt(later, "explicit-later-approval");
+  const gate = await f.coordination.beginAttempt(later, "explicit-later-approval", f.identity);
   assert.equal(gate.policy.policyDigest, f.approved.policyDigest);
   const binding = { ...f.binding, sourceCommit: later };
   assert.equal(await f.reservation.reserveAttempt(f.identity, binding), "RESERVED");
@@ -79,11 +80,48 @@ test("promotion before an attempt binds a verified commit and a version 2 claim"
   assert.equal((await readdir(f.directory)).includes(`${digest}.reservation.json`), true);
 });
 
+test("a separately approved future setting can be promoted but mismatched settings cannot dispatch", async (t) => {
+  const f = await fixture(t);
+  const futureText = policyText.replace('"gpt-6.1-sol"', '"future-approved-model"');
+  await writeFile(join(f.repository, ".agents/relay-orchestration-policy.json"), futureText);
+  git(f.repository, "add", ".agents/relay-orchestration-policy.json");
+  git(f.repository, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "future policy");
+  const future = git(f.repository, "rev-parse", "HEAD");
+  const promoted = await f.coordination.promote(future, "future-specific-approval");
+  assert.equal(promoted.roles.planner.model, "future-approved-model");
+  assert.equal(Object.isFrozen(promoted.roles.planner), true);
+  await assert.rejects(f.coordination.beginAttempt(f.commit, "explicit-policy-approval", f.identity));
+  const gate = await f.coordination.beginAttempt(future, "future-specific-approval", f.identity);
+  await gate.releaseWithoutClaim();
+  const result = await createPlannerHandoff(hostFor(f.context), f.reservation, f.coordination)(
+    { ...f.context, approvedPolicyCommit: future, approvedPolicyEvidence: "future-specific-approval" }, policy);
+  assert.equal(result.status, "STOP");
+  assert.equal((await readdir(f.directory)).some((name) => name.endsWith(".reservation.json")), false);
+});
+
+test("a reused reservation directory rejects another repository and a forged active reference", async (t) => {
+  const f = await fixture(t);
+  const other = { ...f.identity, canonicalRepository: "someone/Other" };
+  await assert.rejects(f.coordination.beginAttempt(f.commit, "explicit-policy-approval", other));
+  git(f.repository, "remote", "set-url", "origin", "https://github.com/someone/Other.git");
+  const otherCoordination = new PolicyCoordination(f.repository, f.reservation);
+  await assert.rejects(otherCoordination.promote(f.commit, "other-repository-approval"));
+  await assert.rejects(otherCoordination.beginAttempt(f.commit, "explicit-policy-approval", other));
+  git(f.repository, "remote", "set-url", "origin", "https://github.com/putman44/Relay.git");
+  const activePath = join(f.directory, ".active-policy.json");
+  const active = JSON.parse(await readFile(activePath, "utf8"));
+  await writeFile(activePath, JSON.stringify({ ...active, canonicalRepository: "someone/Other" }) + "\n");
+  await assert.rejects(f.coordination.beginAttempt(f.commit, "explicit-policy-approval", f.identity));
+  const result = await createPlannerHandoff(hostFor(f.context), f.reservation, f.coordination)(f.context, policy);
+  assert.equal(result.status, "STOP");
+  assert.equal((await readdir(f.directory)).some((name) => name.endsWith(".reservation.json")), false);
+});
+
 test("identity mismatch at the final pre-dispatch check holds the claim", async (t) => {
   const f = await fixture(t);
   let checks = 0;
-  const coordinator: PolicyCoordinator = { async beginAttempt(commit, approval) {
-    const gate = await f.coordination.beginAttempt(commit, approval);
+  const coordinator: PolicyCoordinator = { async beginAttempt(commit, approval, identity) {
+    const gate = await f.coordination.beginAttempt(commit, approval, identity);
     return { ...gate, async assertCurrent() {
       checks += 1;
       if (checks === 8) throw new Error("policy identity changed before dispatch");
@@ -117,7 +155,7 @@ test("clean capability failure records no dispatch and releases the temporary ga
 
 test("active attempt blocks promotion, clean completion releases only its temporary gate", async (t) => {
   const f = await fixture(t);
-  const gate = await f.coordination.beginAttempt(f.commit, "explicit-policy-approval");
+  const gate = await f.coordination.beginAttempt(f.commit, "explicit-policy-approval", f.identity);
   await f.reservation.reserveAttempt(f.identity, f.binding);
   await assert.rejects(f.coordination.promote(f.commit, "separate-promotion-approval"));
   await gate.complete("NO_DISPATCH", attemptDigest(f.identity));
@@ -162,7 +200,7 @@ test("ambiguous dispatch remains blocked across restart and separate process", a
 
 test("interrupted process retains its gate and reservation for reconciliation", async (t) => {
   const f = await fixture(t);
-  const script = `import {FileAttemptReservation} from './src/orchestration/file-attempt-reservation.ts'; import {PolicyCoordination} from './src/orchestration/policy-coordination.ts'; const r=new FileAttemptReservation(process.argv[2]); const c=new PolicyCoordination(process.argv[1],r); await c.beginAttempt(process.argv[3],'explicit-policy-approval'); await r.reserveAttempt(${JSON.stringify(f.identity)},${JSON.stringify(f.binding)});`;
+  const script = `import {FileAttemptReservation} from './src/orchestration/file-attempt-reservation.ts'; import {PolicyCoordination} from './src/orchestration/policy-coordination.ts'; const r=new FileAttemptReservation(process.argv[2]); const c=new PolicyCoordination(process.argv[1],r); await c.beginAttempt(process.argv[3],'explicit-policy-approval',${JSON.stringify(f.identity)}); await r.reserveAttempt(${JSON.stringify(f.identity)},${JSON.stringify(f.binding)});`;
   const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script, f.repository, f.directory, f.commit], { encoding: "utf8" });
   assert.equal(child.status, 0, child.stderr);
   assert.equal((await readdir(f.directory)).includes(".policy-gate.json"), true);
@@ -196,7 +234,7 @@ test("legacy and corrupt claims block promotion without erasing evidence", async
 
 test("corrupt completion evidence blocks promotion after a clean gate release", async (t) => {
   const f = await fixture(t);
-  const gate = await f.coordination.beginAttempt(f.commit, "explicit-policy-approval");
+  const gate = await f.coordination.beginAttempt(f.commit, "explicit-policy-approval", f.identity);
   await f.reservation.reserveAttempt(f.identity, f.binding);
   const digest = attemptDigest(f.identity);
   await gate.complete("NO_DISPATCH", digest);
