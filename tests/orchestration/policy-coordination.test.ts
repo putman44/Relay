@@ -22,6 +22,8 @@ async function fixture(t: TestContext) {
   await writeFile(join(repository, ".agents/relay-orchestration-policy.json"), policyText);
   git(repository, "init", "-q");
   git(repository, "remote", "add", "origin", "https://github.com/putman44/Relay.git");
+  git(repository, "config", "branch.main.remote", "origin");
+  git(repository, "config", "branch.main.merge", "refs/heads/main");
   git(repository, "add", ".agents/relay-orchestration-policy.json");
   git(repository, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "approved policy");
   const commit = git(repository, "rev-parse", "HEAD");
@@ -149,7 +151,7 @@ test("clean capability failure records no dispatch and releases the temporary ga
   assert.equal((await readdir(f.directory)).includes(".policy-gate.json"), false);
   const digest = attemptDigest(f.identity);
   assert.equal(JSON.parse(await readFile(join(f.directory, `${digest}.completion.json`), "utf8")).outcome, "NO_DISPATCH");
-  await f.coordination.promote(f.commit, "separate-promotion-approval");
+  await assert.rejects(f.coordination.promote(f.commit, "separate-promotion-approval"));
   assert.equal(await f.reservation.reserveAttempt(f.identity, f.binding), "ALREADY_RESERVED");
 });
 
@@ -159,7 +161,7 @@ test("active attempt blocks promotion, clean completion releases only its tempor
   await f.reservation.reserveAttempt(f.identity, f.binding);
   await assert.rejects(f.coordination.promote(f.commit, "separate-promotion-approval"));
   await gate.complete("NO_DISPATCH", attemptDigest(f.identity));
-  await f.coordination.promote(f.commit, "separate-promotion-approval");
+  await assert.rejects(f.coordination.promote(f.commit, "separate-promotion-approval"));
   assert.equal(await f.reservation.reserveAttempt(f.identity, f.binding), "ALREADY_RESERVED");
 });
 
@@ -243,4 +245,126 @@ test("corrupt completion evidence blocks promotion after a clean gate release", 
   await assert.rejects(f.coordination.promote(f.commit, "later-approval"));
   assert.equal(await readFile(completion, "utf8"), "{");
   assert.equal((await readdir(f.directory)).includes(`${digest}.reservation.json`), true);
+});
+
+test("policy changes after reservation and before first capability proof hold the claim", async (t) => {
+  const f = await fixture(t);
+  let checks = 0;
+  const coordinator: PolicyCoordinator = { async beginAttempt(commit, approval, identity) {
+    const gate = await f.coordination.beginAttempt(commit, approval, identity);
+    return { ...gate, async assertCurrent() {
+      checks += 1;
+      if (checks === 2) await writeFile(join(f.repository, ".agents/relay-orchestration-policy.json"), policyText.replace("medium", "low"));
+      await gate.assertCurrent();
+    } };
+  } };
+  let capabilityCalls = 0;
+  const host = hostFor(f.context);
+  host.checkCapability = async () => { capabilityCalls += 1; throw new Error("unexpected capability call"); };
+  const result = await createPlannerHandoff(host, f.reservation, coordinator)(f.context, policy);
+  assert.equal(result.status, "STOP");
+  if (result.status === "STOP") assert.equal(result.code, "POLICY_IDENTITY_MISMATCH");
+  assert.equal(capabilityCalls, 0);
+  assert.equal((await readdir(f.directory)).includes(".policy-gate.json"), true);
+  assert.equal(await new FileAttemptReservation(f.directory).reserveAttempt(f.identity, f.binding), "ALREADY_RESERVED");
+});
+
+test("malformed, old-version, mismatched, and completed reservations all block promotion", async (t) => {
+  for (const kind of ["completed", "malformed", "old-version", "mismatched"] as const) {
+    await t.test(kind, async (subtest) => {
+      const f = await fixture(subtest);
+      const gate = await f.coordination.beginAttempt(f.commit, "explicit-policy-approval", f.identity);
+      assert.equal(await f.reservation.reserveAttempt(f.identity, f.binding), "RESERVED");
+      const digest = attemptDigest(f.identity);
+      await gate.complete("NO_DISPATCH", digest);
+      const path = join(f.directory, `${digest}.reservation.json`);
+      const original = await readFile(path, "utf8");
+      if (kind === "malformed") await writeFile(path, "{");
+      if (kind === "old-version") await writeFile(path, JSON.stringify({ ...JSON.parse(original), version: 1 }) + "\n");
+      if (kind === "mismatched") await writeFile(path, JSON.stringify({ ...JSON.parse(original), policy: { ...f.binding,
+        policyDigest: "f".repeat(64) } }) + "\n");
+      const retained = await readFile(path, "utf8");
+      const restarted = new PolicyCoordination(f.repository, new FileAttemptReservation(f.directory));
+      await assert.rejects(restarted.promote(f.commit, "later-approval"));
+      assert.equal(await readFile(path, "utf8"), retained);
+      assert.equal((await readdir(f.directory)).includes(".policy-gate.json"), false);
+    });
+  }
+});
+
+test("same six-field identity cannot reserve twice with amended requirements or policy", async (t) => {
+  const f = await fixture(t);
+  assert.equal(await f.reservation.reserveAttempt(f.identity, f.binding), "RESERVED");
+  const restarted = new FileAttemptReservation(f.directory);
+  assert.equal(await restarted.reserveAttempt(f.identity, f.binding), "ALREADY_RESERVED");
+  await assert.rejects(restarted.reserveAttempt(f.identity, { ...f.binding, requirementsVersion: "requirements-v2" }));
+  await assert.rejects(restarted.reserveAttempt(f.identity, { ...f.binding, policyDigest: "f".repeat(64) }));
+  assert.deepEqual((await readdir(f.directory)).filter((name) => name.endsWith(".reservation.json")),
+    [`${attemptDigest(f.identity)}.reservation.json`]);
+});
+
+test("failed cleanup after unlink cannot promote a retained attempt across restart", async (t) => {
+  const f = await fixture(t);
+  const faulting = new PolicyCoordination(f.repository, f.reservation, () => { throw new Error("injected after unlink"); });
+  const gate = await faulting.beginAttempt(f.commit, "explicit-policy-approval", f.identity);
+  await f.reservation.reserveAttempt(f.identity, f.binding);
+  const digest = attemptDigest(f.identity);
+  await assert.rejects(gate.complete("NO_DISPATCH", digest), /injected after unlink/);
+  assert.equal((await readdir(f.directory)).includes(".policy-gate.json"), false);
+  assert.equal((await readdir(f.directory)).includes(`${digest}.completion.json`), true);
+  await assert.rejects(new PolicyCoordination(f.repository, new FileAttemptReservation(f.directory)).promote(f.commit, "later-approval"));
+  assert.equal(await new FileAttemptReservation(f.directory).reserveAttempt(f.identity, f.binding), "ALREADY_RESERVED");
+});
+
+test("pre-reservation unlink failure is ambiguous and has no retained attempt hold", async (t) => {
+  const f = await fixture(t);
+  const faulting = new PolicyCoordination(f.repository, f.reservation, () => { throw new Error("injected after unlink"); });
+  const gate = await faulting.beginAttempt(f.commit, "explicit-policy-approval", f.identity);
+  await assert.rejects(gate.releaseWithoutClaim(), /injected after unlink/);
+  assert.equal((await readdir(f.directory)).includes(".policy-gate.json"), false);
+  assert.equal((await readdir(f.directory)).some((name) => name.endsWith(".reservation.json")), false);
+  // No durable claim exists. The caller must treat the failed release as uncertain;
+  // the file boundary alone cannot prove that cleanup succeeded after restart.
+  await new PolicyCoordination(f.repository, new FileAttemptReservation(f.directory)).promote(f.commit, "later-approval");
+});
+
+test("configured SSH and non-origin upstream preserve canonical identity and reject conflicts", async (t) => {
+  const f = await fixture(t);
+  git(f.repository, "remote", "set-url", "origin", "git@github.com:putman44/Relay.git");
+  let gate = await f.coordination.beginAttempt(f.commit, "explicit-policy-approval", f.identity);
+  await gate.releaseWithoutClaim();
+  git(f.repository, "remote", "add", "upstream", "ssh://git@github.com/putman44/Relay.git");
+  git(f.repository, "config", "branch.main.remote", "upstream");
+  gate = await f.coordination.beginAttempt(f.commit, "explicit-policy-approval", f.identity);
+  await gate.releaseWithoutClaim();
+  git(f.repository, "remote", "set-url", "--push", "upstream", "git@github.com:someone/Other.git");
+  await assert.rejects(f.coordination.beginAttempt(f.commit, "explicit-policy-approval", f.identity));
+});
+
+test("malformed, old-version, and mismatched active policy evidence stop before reservation", async (t) => {
+  for (const kind of ["malformed", "old-version", "mismatched"] as const) {
+    await t.test(kind, async (subtest) => {
+      const f = await fixture(subtest);
+      const path = join(f.directory, ".active-policy.json");
+      const active = JSON.parse(await readFile(path, "utf8"));
+      await writeFile(path, kind === "malformed" ? "{" : JSON.stringify(kind === "old-version" ?
+        { ...active, version: 0 } : { ...active, policyDigest: "f".repeat(64) }) + "\n");
+      let capabilityCalls = 0;
+      const host = hostFor(f.context);
+      host.checkCapability = async () => { capabilityCalls += 1; throw new Error("unexpected capability call"); };
+      const result = await createPlannerHandoff(host, f.reservation, f.coordination)(f.context, policy);
+      assert.equal(result.status, "STOP");
+      assert.equal(capabilityCalls, 0);
+      assert.equal((await readdir(f.directory)).some((name) => name.endsWith(".reservation.json")), false);
+    });
+  }
+});
+
+test("incomplete reservation without a completion sidecar blocks promotion", async (t) => {
+  const f = await fixture(t);
+  const gate = await f.coordination.beginAttempt(f.commit, "explicit-policy-approval", f.identity);
+  await f.reservation.reserveAttempt(f.identity, f.binding);
+  await gate.releaseWithoutClaim();
+  assert.equal((await readdir(f.directory)).some((name) => name.endsWith(".completion.json")), false);
+  await assert.rejects(new PolicyCoordination(f.repository, new FileAttemptReservation(f.directory)).promote(f.commit, "later-approval"));
 });

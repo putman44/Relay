@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { constants } from "node:fs";
 import { open, readFile, readdir, rename, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -13,10 +13,32 @@ type RoleSettings = Readonly<Record<typeof roles[number], Readonly<{ model: stri
 export interface CanonicalRepository { readonly canonicalHost: string; readonly canonicalRepository: string }
 
 function repositoryIdentity(repository: string): CanonicalRepository {
-  const origin = execFileSync("git", ["config", "--get", "remote.origin.url"], { cwd: resolve(repository), encoding: "utf8" }).trim();
-  const match = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(origin);
-  if (!match) throw new Error("Canonical GitHub origin is unavailable");
-  return Object.freeze({ canonicalHost: "github.com", canonicalRepository: match[1]! });
+  const cwd = resolve(repository);
+  const configured = (...args: string[]) => {
+    const result = spawnSync("git", ["config", ...args], { cwd, encoding: "utf8" });
+    if (result.status !== 0 && result.status !== 1) throw new Error("Git upstream configuration unavailable");
+    return result.status === 0 ? result.stdout.trim().split("\n") : [];
+  };
+  const remote = configured("--get-all", "branch.main.remote");
+  const merge = configured("--get-all", "branch.main.merge");
+  if (remote.length !== 1 || !/^[A-Za-z0-9_.-]+$/.test(remote[0]!) || remote[0] === "." ||
+      merge.length !== 1 || merge[0] !== "refs/heads/main") throw new Error("Configured main upstream is unavailable");
+  const fetch = configured("--get-all", `remote.${remote[0]}.url`);
+  const pushConfigured = configured("--get-all", `remote.${remote[0]}.pushurl`);
+  const push = pushConfigured.length ? pushConfigured : fetch;
+  if (fetch.length !== 1 || push.length !== 1) throw new Error("Ambiguous upstream URLs");
+  const parse = (url: string): CanonicalRepository => {
+    const match = /^(?:https:\/\/([A-Za-z0-9.-]+)\/|ssh:\/\/git@([A-Za-z0-9.-]+)\/|git@([A-Za-z0-9.-]+):)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(url);
+    if (!match) throw new Error("Unsupported GitHub upstream URL");
+    return { canonicalHost: (match[1] || match[2] || match[3])!.toLowerCase(), canonicalRepository: match[4]! };
+  };
+  const identity = parse(fetch[0]!);
+  const pushIdentity = parse(push[0]!);
+  if (identity.canonicalHost !== pushIdentity.canonicalHost || identity.canonicalRepository !== pushIdentity.canonicalRepository ||
+      execFileSync("git", ["remote", "get-url", "--all", remote[0]!], { cwd, encoding: "utf8" }).trim() !== fetch[0] ||
+      execFileSync("git", ["remote", "get-url", "--push", "--all", remote[0]!], { cwd, encoding: "utf8" }).trim() !== push[0])
+    throw new Error("Conflicting upstream identity or URL rewrite");
+  return Object.freeze(identity);
 }
 
 export interface PolicyIdentity {
@@ -92,7 +114,8 @@ export interface PolicyCoordinator {
 
 /** One local gate serializes policy promotion with reservation, capability checks and dispatch. */
 export class PolicyCoordination implements PolicyCoordinator {
-  constructor(private readonly repository: string, private readonly reservation: FileAttemptReservation) {}
+  constructor(private readonly repository: string, private readonly reservation: FileAttemptReservation,
+    private readonly afterGateUnlink?: () => void) {}
 
   private get directory() { return this.reservation.directory; }
   private get gatePath() { return join(this.directory, ".policy-gate.json"); }
@@ -129,6 +152,7 @@ export class PolicyCoordination implements PolicyCoordinator {
     return { id, verify, release: async () => {
       await verify();
       await unlink(this.gatePath);
+      this.afterGateUnlink?.();
       await this.syncDirectory();
       await this.reservation.verifyDirectory();
     } };
@@ -142,7 +166,7 @@ export class PolicyCoordination implements PolicyCoordinator {
       if (Object.keys(record).sort().join() !== "approvalEvidence,canonicalHost,canonicalRepository,policyDigest,sourceCommit,version" || record.version !== 1 ||
           typeof record.policyDigest !== "string" || !/^[0-9a-f]{64}$/.test(record.policyDigest) ||
           typeof record.sourceCommit !== "string" || !commitPattern.test(record.sourceCommit) || !token(record.approvalEvidence) ||
-          record.canonicalHost !== "github.com" || !token(record.canonicalRepository) ||
+          !token(record.canonicalHost) || !/^[A-Za-z0-9.-]+$/.test(record.canonicalHost) || !token(record.canonicalRepository) ||
           !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(record.canonicalRepository)) {
         throw new Error("Corrupt active policy reference");
       }
@@ -168,14 +192,8 @@ export class PolicyCoordination implements PolicyCoordinator {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
       for (const name of await readdir(this.directory)) {
-        if (!name.endsWith(".reservation.json")) continue;
-        const digest = name.slice(0, -".reservation.json".length);
-        const completion = join(this.directory, `${digest}.completion.json`);
-        const reservation = await this.reservation.readReservation(digest);
-        if (reservation.version !== 2) throw new Error("Legacy reservation requires reconciliation before promotion");
-        const proof = JSON.parse(await this.readPrivate(completion)) as Record<string, unknown>;
-        if (Object.keys(proof).sort().join() !== "digest,outcome,version" || proof.version !== 1 || proof.digest !== digest ||
-            !["NO_DISPATCH", "VALIDATED_RESPONSE"].includes(String(proof.outcome))) throw new Error("Attempt completion is unproven");
+        if (name.endsWith(".reservation.json"))
+          throw new Error("Retained attempt reservation requires explicit reconciliation before policy promotion");
       }
       const record = JSON.stringify({ version: 1, ...identity, policyDigest: policy.policyDigest, sourceCommit, approvalEvidence }) + "\n";
       const temporary = join(this.directory, `.active-policy-${gate.id}.tmp`);
@@ -199,7 +217,7 @@ export class PolicyCoordination implements PolicyCoordinator {
     const expected = policyFromCommit(this.repository, approvedCommit);
     const repository = repositoryIdentity(this.repository);
     if (identity.canonicalHost !== repository.canonicalHost || identity.canonicalRepository !== repository.canonicalRepository)
-      throw new Error("Attempt repository differs from canonical GitHub origin");
+      throw new Error("Attempt repository differs from canonical GitHub upstream");
     const gate = await this.acquire();
     const assertCurrent = async () => {
       await gate.verify();
@@ -207,7 +225,7 @@ export class PolicyCoordination implements PolicyCoordinator {
       const currentRepository = repositoryIdentity(this.repository);
       if (currentRepository.canonicalHost !== repository.canonicalHost ||
           currentRepository.canonicalRepository !== repository.canonicalRepository)
-        throw new Error("Canonical GitHub origin changed");
+        throw new Error("Canonical GitHub upstream changed");
       const active = await this.active();
       if (active.canonicalHost !== repository.canonicalHost || active.canonicalRepository !== repository.canonicalRepository ||
           active.policyDigest !== expected.policyDigest || active.sourceCommit !== expected.sourceCommit ||
