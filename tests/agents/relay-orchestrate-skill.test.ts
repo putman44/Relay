@@ -199,6 +199,8 @@ test('relay-orchestrate preserves role boundaries and ordered handoffs', async (
 
   assert.match(skill, /fresh.*planner.*context/i);
   assert.match(skill, /invoke `relay-plan`.*same issue/is);
+  assert.match(skill, /invoke `relay-plan`.*same issue with `Output mode: HANDOFF`/is);
+  assert.match(skill, /Require only the complete HANDOFF report/);
   assert.match(skill, /plan status.*exactly `READY`/i);
   assert.match(skill, /`BLOCKED`.*STOP/is);
   assert.match(skill, /unresolved material human decision.*STOP/is);
