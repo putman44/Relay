@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 import {
   AGENT_RESPONSE_SCHEMA_VERSION,
@@ -51,6 +52,14 @@ export interface PlannerHost {
   dispatchPlanner(request: Readonly<PlannerDispatchRequest>): Promise<unknown>;
 }
 
+export type PlannerAttemptIdentity = Pick<PlannerHandoffContext,
+  "canonicalHost" | "canonicalRepository" | "issueNumber" | "runId" | "taskId" | "attemptId">;
+
+/** Inject only a trusted provider whose reservation is atomic and retained for reconciliation. */
+export interface TrustedAttemptReservation {
+  reserveAttempt(identity: Readonly<PlannerAttemptIdentity>): Promise<unknown>;
+}
+
 const ResponseEnvelope = z.strictObject({
   issueNumber: TrustedInput.shape.issueNumber,
   canonicalHost: Text,
@@ -63,34 +72,64 @@ export type PlannerHandoffResult =
   | { status: "BLOCKED"; response: Extract<PlannerResponse, { status: "BLOCKED" }> }
   | { status: "STOP"; code: "INVALID_TRUSTED_CONTEXT" | "MALFORMED_ROLE_POLICY" |
       "HOST_DISPATCH_UNAVAILABLE" | "CAPABILITY_UNPROVEN" | "DUPLICATE_ATTEMPT" |
+      "RESERVATION_UNAVAILABLE" | "RESERVATION_OUTCOME_AMBIGUOUS" |
       "DISPATCH_OUTCOME_AMBIGUOUS" | "MALFORMED_RESPONSE" | "IDENTITY_MISMATCH";
     detail: string };
 
 const stop = (code: Extract<PlannerHandoffResult, { status: "STOP" }>["code"], detail: string): PlannerHandoffResult =>
   ({ status: "STOP", code, detail });
 
-/** One instance owns one in-memory attempt registry. A durable caller must prevent duplicates across instances. */
-export function createPlannerHandoff(host?: PlannerHost) {
+/** No production reservation or host adapter is supplied by this dry-run boundary. */
+export function createPlannerHandoff(host?: PlannerHost, reservation?: TrustedAttemptReservation) {
   const attempted = new Set<string>();
   return async (context: PlannerHandoffContext, policy: unknown): Promise<PlannerHandoffResult> => {
     const input = TrustedInput.safeParse(context);
     if (!input.success) return stop("INVALID_TRUSTED_CONTEXT", "Trusted issue or execution context is incomplete or malformed");
     const configured = RolePolicy.safeParse(policy);
     if (!configured.success) return stop("MALFORMED_ROLE_POLICY", "Complete exact role policy is required");
+    let repositoryPolicy: unknown;
+    try {
+      repositoryPolicy = JSON.parse(readFileSync(new URL("../../.agents/relay-orchestration-policy.json", import.meta.url), "utf8"));
+    } catch {
+      return stop("MALFORMED_ROLE_POLICY", "Authoritative repository role policy is unavailable");
+    }
+    const authoritative = RolePolicy.safeParse(repositoryPolicy);
+    if (!authoritative.success || JSON.stringify(configured.data) !== JSON.stringify(authoritative.data))
+      return stop("MALFORMED_ROLE_POLICY", "Role policy does not match the authoritative repository policy");
     // Snapshot every configured value before a host callback can observe policy state.
     const expected = Object.freeze({
-      planner: Object.freeze({ ...configured.data.roles.planner }),
-      implementer: Object.freeze({ ...configured.data.roles.implementer }),
-      reviewer: Object.freeze({ ...configured.data.roles.reviewer }),
+      planner: Object.freeze({ ...authoritative.data.roles.planner }),
+      implementer: Object.freeze({ ...authoritative.data.roles.implementer }),
+      reviewer: Object.freeze({ ...authoritative.data.roles.reviewer }),
     });
     if (!host || typeof host.checkCapability !== "function" || typeof host.dispatchPlanner !== "function")
       return stop("HOST_DISPATCH_UNAVAILABLE", "No verified host dispatcher is installed");
+    if (!reservation || typeof reservation.reserveAttempt !== "function")
+      return stop("RESERVATION_UNAVAILABLE", "No trusted atomic attempt reservation is installed");
 
     const trusted = input.data;
-    const key = JSON.stringify([trusted.runId, trusted.taskId, trusted.attemptId]);
+    const attemptIdentity: PlannerAttemptIdentity = Object.freeze({
+      canonicalHost: trusted.canonicalHost,
+      canonicalRepository: trusted.canonicalRepository,
+      issueNumber: trusted.issueNumber,
+      runId: trusted.runId,
+      taskId: trusted.taskId,
+      attemptId: trusted.attemptId,
+    });
+    const key = JSON.stringify(attemptIdentity);
     if (attempted.has(key)) return stop("DUPLICATE_ATTEMPT", "This execution attempt was already invoked");
-    // Reserve before the first host call. Unknown outcomes remain held, never retried.
+    // This local hold also prevents a second call after an uncertain reservation result.
     attempted.add(key);
+    // Reserve before the first host call. Unknown reservation outcomes remain held, never retried.
+    let reserved: unknown;
+    try {
+      reserved = await reservation.reserveAttempt(attemptIdentity);
+    } catch {
+      return stop("RESERVATION_OUTCOME_AMBIGUOUS", "Attempt reservation outcome requires reconciliation");
+    }
+    if (reserved === "ALREADY_RESERVED") return stop("DUPLICATE_ATTEMPT", "This execution attempt was already reserved");
+    if (reserved !== "RESERVED")
+      return stop("RESERVATION_OUTCOME_AMBIGUOUS", "Attempt reservation outcome requires reconciliation");
 
     for (const role of ["planner", "implementer", "reviewer"] as const) {
       const setting = expected[role];
@@ -147,6 +186,12 @@ export function createPlannerHandoff(host?: PlannerHost) {
       expectedRole: "planner",
     });
     if (!identity.valid) return stop("IDENTITY_MISMATCH", identity.errors.join("; "));
+    if (response.data.status === "READY") {
+      const requirements = response.data.evidenceReferences.filter((reference) => reference.kind === "REQUIREMENTS");
+      const expectedLocator = `https://${trusted.canonicalHost}/${trusted.canonicalRepository}/issues/${trusted.issueNumber}`;
+      if (requirements.length === 0 || requirements.some((reference) => reference.locator !== expectedLocator))
+        return stop("IDENTITY_MISMATCH", "Planner READY requirements evidence does not identify the approved GitHub issue");
+    }
     // Planner data is advisory. A READY result grants no later dispatch or mutation authority.
     return response.data.status === "READY"
       ? { status: "READY", response: response.data }
