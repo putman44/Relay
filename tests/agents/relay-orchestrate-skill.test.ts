@@ -35,9 +35,9 @@ test('relay-orchestrate uses one exact, centralized role policy', async () => {
   assert.deepEqual(policy, {
     schemaVersion: 1,
     roles: {
-      planner: { model: 'gpt-5.6-sol', reasoningEffort: 'medium' },
-      implementer: { model: 'gpt-5.6-sol', reasoningEffort: 'high' },
-      reviewer: { model: 'gpt-5.6-sol', reasoningEffort: 'high' },
+      planner: { model: 'gpt-6.1-sol', reasoningEffort: 'medium' },
+      implementer: { model: 'gpt-6.1-sol', reasoningEffort: 'high' },
+      reviewer: { model: 'gpt-6.1-sol', reasoningEffort: 'high' },
     },
   });
   assert.match(skill, /\.agents\/relay-orchestration-policy\.json/);

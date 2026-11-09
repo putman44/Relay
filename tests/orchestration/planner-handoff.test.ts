@@ -72,6 +72,11 @@ test("one approved issue yields an exact fresh Planner request and validated REA
   const { host, calls } = fakeHost();
   const result = await handoff(host)(context, policy);
   assert.equal(result.status, "READY");
+  assert.deepEqual(policy.roles, {
+    planner: { model: "gpt-6.1-sol", reasoningEffort: "medium" },
+    implementer: { model: "gpt-6.1-sol", reasoningEffort: "high" },
+    reviewer: { model: "gpt-6.1-sol", reasoningEffort: "high" },
+  });
   assert.deepEqual(calls.slice(0, 3), (["planner", "implementer", "reviewer"] as const).map((role) =>
     ["capability", role, policy.roles[role]]));
   assert.deepEqual(calls[3], ["dispatch", {
@@ -213,14 +218,21 @@ test("READY requires exact issue and repository evidence while permitting other 
 });
 
 test("unsupported exact settings, missing proof, and absent fresh context stop without dispatch", async () => {
-  for (const proof of [undefined, { role: "planner", model: "fallback", reasoningEffort: "medium", freshIndependentContext: true },
-    { role: "planner", ...policy.roles.planner, freshIndependentContext: false }]) {
-    const { host, calls } = fakeHost();
-    host.checkCapability = async () => proof;
-    const result = await handoff(host)(context, policy);
-    assert.equal(result.status, "STOP");
-    if (result.status === "STOP") assert.equal(result.code, "CAPABILITY_UNPROVEN");
-    assert.equal(calls.length, 0);
+  for (const role of ["planner", "implementer", "reviewer"] as const) {
+    for (const proof of [
+      undefined,
+      { role, ...policy.roles[role], model: "gpt-6-sol", freshIndependentContext: true },
+      { role, ...policy.roles[role], reasoningEffort: "low", freshIndependentContext: true },
+      { role, ...policy.roles[role], freshIndependentContext: false },
+    ]) {
+      const { host, calls } = fakeHost();
+      host.checkCapability = async (checkedRole, setting) => checkedRole === role
+        ? proof : { role: checkedRole, ...setting, freshIndependentContext: true };
+      const result = await handoff(host)(context, policy);
+      assert.equal(result.status, "STOP");
+      if (result.status === "STOP") assert.equal(result.code, "CAPABILITY_UNPROVEN");
+      assert.equal(calls.some((call) => Array.isArray(call) && call[0] === "dispatch"), false);
+    }
   }
 });
 
