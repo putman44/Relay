@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { createPlannerHandoff, type PlannerHandoffContext, type PlannerHost, type TrustedAttemptReservation } from "../../src/orchestration/planner-handoff.js";
+import { policyFromCommit, type PolicyCoordinator } from "../../src/orchestration/policy-coordination.js";
 
+const repository = fileURLToPath(new URL("../../", import.meta.url));
+const approvedPolicyCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
+const frozenPolicy = policyFromCommit(repository, approvedPolicyCommit);
+const coordinator: PolicyCoordinator = { async beginAttempt() { return {
+  policy: frozenPolicy, async assertCurrent() {}, async complete() {}, async releaseWithoutClaim() {},
+}; } };
 const policy = JSON.parse(readFileSync(new URL("../../.agents/relay-orchestration-policy.json", import.meta.url), "utf8"));
 const context: PlannerHandoffContext = {
   issueNumber: 28,
@@ -14,6 +23,8 @@ const context: PlannerHandoffContext = {
   taskId: "planner-invocation",
   attemptId: "attempt-1",
   requirementsVersion: "issue-28-approved-body-v1",
+  approvedPolicyCommit,
+  approvedPolicyEvidence: "explicit-policy-approval",
 };
 const identity = {
   schemaVersion: 1,
@@ -66,7 +77,7 @@ const fakeReservation = () => {
   };
   return reservation;
 };
-const handoff = (host: PlannerHost, reservation = fakeReservation()) => createPlannerHandoff(host, reservation);
+const handoff = (host: PlannerHost, reservation = fakeReservation()) => createPlannerHandoff(host, reservation, coordinator);
 
 test("one approved issue yields an exact fresh Planner request and validated READY", async () => {
   const { host, calls } = fakeHost();
@@ -81,6 +92,7 @@ test("one approved issue yields an exact fresh Planner request and validated REA
     ["capability", role, policy.roles[role]]));
   assert.deepEqual(calls[3], ["dispatch", {
     ...context, role: "planner", ...policy.roles.planner, freshIndependentContext: true,
+    policyDigest: frozenPolicy.policyDigest, policySourceCommit: approvedPolicyCommit,
   }]);
   assert.equal(calls.length, 4);
   if (result.status === "READY") assert.deepEqual(result.response, ready);
