@@ -58,6 +58,18 @@ test('relay-orchestrate uses one exact, centralized role policy', async () => {
   assert.match(skill, /STOP/);
 });
 
+test('relay-orchestrate requires immutable policy coordination and explicit promotion', async () => {
+  const skill = await readRepositoryFile('.agents/skills/relay-orchestrate/SKILL.md');
+  assert.match(skill, /full verified Git commit explicitly approved/i);
+  assert.match(skill, /active-policy reference.*same commit.*digest.*approval evidence/i);
+  assert.match(skill, /gate.*before the version 2 reservation.*held through every capability check.*host dispatch.*response validation/is);
+  assert.match(skill, /six-field duplicate key.*policy digest.*source commit.*requirements version/is);
+  assert.match(skill, /clean unambiguous result.*release only the transient gate.*reservation remains permanent/is);
+  assert.match(skill, /crash.*corrupt or legacy evidence.*ambiguous result.*STOP.*reconciliation/is);
+  assert.match(skill, /policy promotion.*separate explicitly approved operation/i);
+  assert.match(skill, /never reclaim a stale gate.*retry an attempt.*delete a claim/i);
+});
+
 test('relay-orchestrate fails closed during issue and repository preflight', async () => {
   const [skill, issueTracker] = await Promise.all([
     readRepositoryFile('.agents/skills/relay-orchestrate/SKILL.md'),

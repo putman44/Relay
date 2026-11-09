@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { attemptDigest } from "./file-attempt-reservation.js";
+import { type PolicyBinding, type PolicyCoordinator, type PolicyGate } from "./policy-coordination.js";
 import { z } from "zod";
 import {
   AGENT_RESPONSE_SCHEMA_VERSION,
@@ -30,6 +32,8 @@ const TrustedInput = z.strictObject({
   taskId: Token,
   attemptId: Token,
   requirementsVersion: Token,
+  approvedPolicyCommit: z.string().regex(/^[0-9a-f]{40}$/),
+  approvedPolicyEvidence: Token,
 });
 export type PlannerHandoffContext = z.infer<typeof TrustedInput>;
 
@@ -45,6 +49,8 @@ export interface PlannerDispatchRequest extends PlannerHandoffContext {
   model: string;
   reasoningEffort: string;
   freshIndependentContext: true;
+  policyDigest: string;
+  policySourceCommit: string;
 }
 
 export interface PlannerHost {
@@ -57,7 +63,7 @@ export type PlannerAttemptIdentity = Pick<PlannerHandoffContext,
 
 /** Inject only a trusted provider whose reservation is atomic and retained for reconciliation. */
 export interface TrustedAttemptReservation {
-  reserveAttempt(identity: Readonly<PlannerAttemptIdentity>): Promise<unknown>;
+  reserveAttempt(identity: Readonly<PlannerAttemptIdentity>, policy: Readonly<PolicyBinding>): Promise<unknown>;
 }
 
 const ResponseEnvelope = z.strictObject({
@@ -73,14 +79,15 @@ export type PlannerHandoffResult =
   | { status: "STOP"; code: "INVALID_TRUSTED_CONTEXT" | "MALFORMED_ROLE_POLICY" |
       "HOST_DISPATCH_UNAVAILABLE" | "CAPABILITY_UNPROVEN" | "DUPLICATE_ATTEMPT" |
       "RESERVATION_UNAVAILABLE" | "RESERVATION_OUTCOME_AMBIGUOUS" |
-      "DISPATCH_OUTCOME_AMBIGUOUS" | "MALFORMED_RESPONSE" | "IDENTITY_MISMATCH";
+      "DISPATCH_OUTCOME_AMBIGUOUS" | "MALFORMED_RESPONSE" | "IDENTITY_MISMATCH" |
+      "POLICY_COORDINATION_UNAVAILABLE" | "POLICY_IDENTITY_MISMATCH";
     detail: string };
 
 const stop = (code: Extract<PlannerHandoffResult, { status: "STOP" }>["code"], detail: string): PlannerHandoffResult =>
   ({ status: "STOP", code, detail });
 
 /** No production reservation or host adapter is supplied by this dry-run boundary. */
-export function createPlannerHandoff(host?: PlannerHost, reservation?: TrustedAttemptReservation) {
+export function createPlannerHandoff(host?: PlannerHost, reservation?: TrustedAttemptReservation, coordination?: PolicyCoordinator) {
   const attempted = new Set<string>();
   return async (context: PlannerHandoffContext, policy: unknown): Promise<PlannerHandoffResult> => {
     const input = TrustedInput.safeParse(context);
@@ -106,6 +113,7 @@ export function createPlannerHandoff(host?: PlannerHost, reservation?: TrustedAt
       return stop("HOST_DISPATCH_UNAVAILABLE", "No verified host dispatcher is installed");
     if (!reservation || typeof reservation.reserveAttempt !== "function")
       return stop("RESERVATION_UNAVAILABLE", "No trusted atomic attempt reservation is installed");
+    if (!coordination) return stop("POLICY_COORDINATION_UNAVAILABLE", "No durable local policy coordination gate is installed");
 
     const trusted = input.data;
     const attemptIdentity: PlannerAttemptIdentity = Object.freeze({
@@ -120,18 +128,46 @@ export function createPlannerHandoff(host?: PlannerHost, reservation?: TrustedAt
     if (attempted.has(key)) return stop("DUPLICATE_ATTEMPT", "This execution attempt was already invoked");
     // This local hold also prevents a second call after an uncertain reservation result.
     attempted.add(key);
+    let gate: PolicyGate;
+    try {
+      gate = await coordination.beginAttempt(trusted.approvedPolicyCommit, trusted.approvedPolicyEvidence,
+        { canonicalHost: trusted.canonicalHost, canonicalRepository: trusted.canonicalRepository });
+    } catch {
+      return stop("POLICY_IDENTITY_MISMATCH", "Approved active policy or coordination gate is unavailable; reconcile any held gate");
+    }
+    try {
+      if (JSON.stringify(configured.data.roles) !== JSON.stringify(gate.policy.roles))
+        throw new Error("Configured policy differs from approved commit");
+      await gate.assertCurrent();
+    } catch {
+      try { await gate.releaseWithoutClaim(); }
+      catch { return stop("RESERVATION_OUTCOME_AMBIGUOUS", "Pre-reservation gate cleanup is uncertain"); }
+      return stop("POLICY_IDENTITY_MISMATCH", "Configured policy differs from the approved active policy");
+    }
+    const binding: PolicyBinding = Object.freeze({ policyDigest: gate.policy.policyDigest,
+      sourceCommit: gate.policy.sourceCommit, requirementsVersion: trusted.requirementsVersion });
+    const cleanStop = async (code: Extract<PlannerHandoffResult, { status: "STOP" }>["code"], detail: string, claimed: boolean) => {
+      try {
+        if (claimed) await gate.complete("NO_DISPATCH", attemptDigest(attemptIdentity));
+        else await gate.releaseWithoutClaim();
+      } catch {
+        return stop("RESERVATION_OUTCOME_AMBIGUOUS", "Coordination cleanup is uncertain and requires reconciliation");
+      }
+      return stop(code, detail);
+    };
     // Reserve before the first host call. Unknown reservation outcomes remain held, never retried.
     let reserved: unknown;
     try {
-      reserved = await reservation.reserveAttempt(attemptIdentity);
+      reserved = await reservation.reserveAttempt(attemptIdentity, binding);
     } catch {
       return stop("RESERVATION_OUTCOME_AMBIGUOUS", "Attempt reservation outcome requires reconciliation");
     }
-    if (reserved === "ALREADY_RESERVED") return stop("DUPLICATE_ATTEMPT", "This execution attempt was already reserved");
+    if (reserved === "ALREADY_RESERVED") return cleanStop("DUPLICATE_ATTEMPT", "This execution attempt was already reserved", false);
     if (reserved !== "RESERVED")
       return stop("RESERVATION_OUTCOME_AMBIGUOUS", "Attempt reservation outcome requires reconciliation");
 
     for (const role of ["planner", "implementer", "reviewer"] as const) {
+      try { await gate.assertCurrent(); } catch { return stop("POLICY_IDENTITY_MISMATCH", "Policy changed during capability verification"); }
       const setting = expected[role];
       let mutationAttempted = false;
       const immutableSetting = new Proxy(setting, {
@@ -143,16 +179,17 @@ export function createPlannerHandoff(host?: PlannerHost, reservation?: TrustedAt
       try {
         proof = await host.checkCapability(role, immutableSetting);
       } catch {
-        return stop("CAPABILITY_UNPROVEN", `Host capability proof failed for ${role}`);
+        return cleanStop("CAPABILITY_UNPROVEN", `Host capability proof failed for ${role}`, true);
       }
-      if (mutationAttempted) return stop("CAPABILITY_UNPROVEN", `Host attempted to alter ${role} settings`);
+      try { await gate.assertCurrent(); } catch { return stop("POLICY_IDENTITY_MISMATCH", "Policy changed while capability check was pending"); }
+      if (mutationAttempted) return cleanStop("CAPABILITY_UNPROVEN", `Host attempted to alter ${role} settings`, true);
       const parsed = z.strictObject({
         role: z.literal(role),
         model: z.literal(setting.model),
         reasoningEffort: z.literal(setting.reasoningEffort),
         freshIndependentContext: z.literal(true),
       }).safeParse(proof);
-      if (!parsed.success) return stop("CAPABILITY_UNPROVEN", `Exact model, effort, and fresh context are unproven for ${role}`);
+      if (!parsed.success) return cleanStop("CAPABILITY_UNPROVEN", `Exact model, effort, and fresh context are unproven for ${role}`, true);
     }
 
     const planner = expected.planner;
@@ -162,13 +199,17 @@ export function createPlannerHandoff(host?: PlannerHost, reservation?: TrustedAt
       model: planner.model,
       reasoningEffort: planner.reasoningEffort,
       freshIndependentContext: true,
+      policyDigest: binding.policyDigest,
+      policySourceCommit: binding.sourceCommit,
     });
+    try { await gate.assertCurrent(); } catch { return stop("POLICY_IDENTITY_MISMATCH", "Policy changed immediately before dispatch"); }
     let raw: unknown;
     try {
       raw = await host.dispatchPlanner(request);
     } catch {
       return stop("DISPATCH_OUTCOME_AMBIGUOUS", "Host dispatch threw; outcome requires reconciliation");
     }
+    try { await gate.assertCurrent(); } catch { return stop("POLICY_IDENTITY_MISMATCH", "Policy changed during dispatch; outcome requires reconciliation"); }
     const envelope = ResponseEnvelope.safeParse(raw);
     if (!envelope.success) return stop("MALFORMED_RESPONSE", "Host response envelope is missing or malformed");
     if (envelope.data.issueNumber !== trusted.issueNumber ||
@@ -193,6 +234,8 @@ export function createPlannerHandoff(host?: PlannerHost, reservation?: TrustedAt
         return stop("IDENTITY_MISMATCH", "Planner READY requirements evidence does not identify the approved GitHub issue");
     }
     // Planner data is advisory. A READY result grants no later dispatch or mutation authority.
+    try { await gate.complete("VALIDATED_RESPONSE", attemptDigest(attemptIdentity)); }
+    catch { return stop("RESERVATION_OUTCOME_AMBIGUOUS", "Completion evidence or gate cleanup is uncertain"); }
     return response.data.status === "READY"
       ? { status: "READY", response: response.data }
       : { status: "BLOCKED", response: response.data };
