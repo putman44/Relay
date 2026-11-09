@@ -1,18 +1,26 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { createPlannerHandoff, type PlannerHandoffContext, type PlannerHost, type TrustedAttemptReservation } from "../../src/orchestration/planner-handoff.js";
-import { policyFromCommit, type PolicyCoordinator } from "../../src/orchestration/policy-coordination.js";
+import { type PolicyCoordinator, type PolicyIdentity } from "../../src/orchestration/policy-coordination.js";
 
 const repository = fileURLToPath(new URL("../../", import.meta.url));
 const approvedPolicyCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
-const frozenPolicy = policyFromCommit(repository, approvedPolicyCommit);
+const policy = JSON.parse(readFileSync(new URL("../../.agents/relay-orchestration-policy.json", import.meta.url), "utf8"));
+const roles = ["planner", "implementer", "reviewer"] as const;
+const frozenPolicy: PolicyIdentity = {
+  encodingVersion: 1,
+  policyDigest: createHash("sha256").update(JSON.stringify([1, policy.schemaVersion, ...roles.map((role) =>
+    [role, policy.roles[role].model, policy.roles[role].reasoningEffort])])).digest("hex"),
+  sourceCommit: approvedPolicyCommit,
+  roles: policy.roles,
+};
 const coordinator: PolicyCoordinator = { async beginAttempt() { return {
   policy: frozenPolicy, async assertCurrent() {}, async complete() {}, async releaseWithoutClaim() {},
 }; } };
-const policy = JSON.parse(readFileSync(new URL("../../.agents/relay-orchestration-policy.json", import.meta.url), "utf8"));
 const context: PlannerHandoffContext = {
   issueNumber: 28,
   approvedIssueBody: "## Objective — guarded local role handoff foundation\n\nIntroduce the smallest testable integration boundary.\n",
