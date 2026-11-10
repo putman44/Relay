@@ -3,6 +3,7 @@ import { PlannerResponseSchema } from "../orchestration/contracts.js";
 import { runApiPlanner } from "./agents/planner.js";
 import { RepositorySchema, TrustedProjectConfigurationSchema, validateProjectContext } from "./project-context.js";
 import { loadRepositoryContext } from "./repository-context.js";
+import { selectIssueContext } from "./context-selection.js";
 
 export async function preparePlannerHandoff(
   selectedNumber: number,
@@ -11,7 +12,7 @@ export async function preparePlannerHandoff(
   readIssue: (number: number, repository: string) => Promise<unknown>,
   send: typeof fetch,
   trustedConfiguration: unknown,
-  sourceSelection?: { checkoutPath: string; paths: readonly string[] },
+  sourceSelection?: { checkoutPath: string; paths: readonly string[] } | { checkoutPath: string; approvalToken: string },
 ) {
   if (!Number.isSafeInteger(selectedNumber) || selectedNumber < 1) throw new Error("Select one positive issue number");
   RepositorySchema.parse(repository);
@@ -28,8 +29,16 @@ export async function preparePlannerHandoff(
     attemptId: randomUUID(),
     requirementsVersion: createHash("sha256").update(`${issueUrl}\n${issue.body}`).digest("hex"),
   };
-  const repositoryContext = sourceSelection
-    ? loadRepositoryContext(sourceSelection.checkoutPath, repository, sourceSelection.paths) : undefined;
+  const repositoryContext = sourceSelection && "approvalToken" in sourceSelection
+    ? (() => {
+      const selection = selectIssueContext({ repository, issueNumber: selectedNumber, issue,
+        trustedConfiguration: configuration, checkoutPath: sourceSelection.checkoutPath });
+      if (selection.approvalToken !== sourceSelection.approvalToken)
+        throw new Error("Approved context does not match current issue or files; preview again");
+      return selection.files;
+    })()
+    : sourceSelection
+      ? loadRepositoryContext(sourceSelection.checkoutPath, repository, sourceSelection.paths) : undefined;
   const report = await runApiPlanner({ issueBody: issue.body, issueUrl, identity,
     ...(repositoryContext ? { repositoryContext } : {}) }, apiKey, send);
   if (report.result !== "PASS") throw new Error(`Planner failed validation: ${report.errors.join("; ")}`);
