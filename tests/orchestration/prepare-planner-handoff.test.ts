@@ -4,6 +4,7 @@ import { preparePlannerHandoff } from "../../scripts/prepare-planner-handoff.js"
 
 const issue = { number: 19, title: "Selected work", body: "Implement only the approved change." };
 const repository = "putman44/Relay";
+const trustedConfiguration = { repository, planner: { model: "gpt-6.1-sol", reasoningEffort: "medium" } };
 const issueUrl = `https://github.com/${repository}/issues/19`;
 const readIssue = async () => issue;
 
@@ -31,7 +32,7 @@ function plannerReply(status: "READY" | "BLOCKED", locator = issueUrl,
 }
 
 test("prepares an issue-bound advisory artifact from a validated Planner response", async () => {
-  const result = await preparePlannerHandoff(19, repository, "fake-key", readIssue, plannerReply("READY"));
+  const result = await preparePlannerHandoff(19, repository, "fake-key", readIssue, plannerReply("READY"), trustedConfiguration);
   assert.equal(result.status, "READY");
   if (result.status !== "READY") return;
   assert.equal(result.artifact.advisoryOnly, true);
@@ -42,23 +43,23 @@ test("prepares an issue-bound advisory artifact from a validated Planner respons
 });
 
 test("a blocked Planner does not produce an Implementer artifact", async () => {
-  const result = await preparePlannerHandoff(19, repository, "fake-key", readIssue, plannerReply("BLOCKED"));
+  const result = await preparePlannerHandoff(19, repository, "fake-key", readIssue, plannerReply("BLOCKED"), trustedConfiguration);
   assert.equal(result.status, "BLOCKED");
   assert.equal("artifact" in result, false);
 });
 
 test("rejects issue identity and requirements evidence mismatches", async () => {
   await assert.rejects(preparePlannerHandoff(19, repository, "fake-key", async () => ({ ...issue, number: 20 }),
-    plannerReply("READY")), /identity mismatch/);
+    plannerReply("READY"), trustedConfiguration), /identity mismatch/);
   await assert.rejects(preparePlannerHandoff(19, repository, "fake-key", readIssue,
-    plannerReply("READY", "https://github.com/putman44/Relay/issues/20")), /requirements evidence/);
+    plannerReply("READY", "https://github.com/putman44/Relay/issues/20"), trustedConfiguration), /requirements evidence/);
 });
 
 test("rejects the entire handoff when the tool-free Planner claims unsupported evidence", async () => {
   for (const kind of ["REPOSITORY", "CHECK", "INVESTIGATION"] as const) {
     for (const status of ["READY", "BLOCKED"] as const) {
       await assert.rejects(preparePlannerHandoff(19, repository, "fake-key", readIssue,
-        plannerReply(status, issueUrl, kind)), /unsupported evidence reference/);
+        plannerReply(status, issueUrl, kind), trustedConfiguration), /unsupported evidence reference/);
     }
   }
 });
