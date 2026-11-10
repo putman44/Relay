@@ -1,12 +1,49 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { blockedStatusReport, preparePlannerHandoff } from "../../scripts/prepare-planner-handoff.js";
+import { blockedStatusReport, main, parseHandoffArgs, preparePlannerHandoff } from "../../scripts/prepare-planner-handoff.js";
 
 const issue = { number: 19, title: "Selected work", body: "Implement only the approved change." };
 const repository = "putman44/Relay";
 const trustedConfiguration = { repository, planner: { model: "gpt-6.1-sol", reasoningEffort: "medium" } };
 const issueUrl = `https://github.com/${repository}/issues/19`;
 const readIssue = async () => issue;
+
+test("CLI parses valid preview, manual, approved and no-context modes", () => {
+  const base = ["--issue", "19", "--repo", repository];
+  assert.equal(parseHandoffArgs([...base, "--checkout", "/checkout", "--preview-context"]).preview, true);
+  assert.deepEqual(parseHandoffArgs([...base, "--output", "/tmp/plan", "--allow-live-api",
+    "--checkout", "/checkout", "--context-path", "src/a.ts", "--context-path", "tests/a.test.ts"]).paths,
+  ["src/a.ts", "tests/a.test.ts"]);
+  assert.equal(parseHandoffArgs([...base, "--output", "/tmp/plan", "--allow-live-api",
+    "--checkout", "/checkout", "--approve-context", "token"]).approvalToken, "token");
+  assert.equal(parseHandoffArgs([...base, "--output", "/tmp/plan", "--allow-live-api"]).checkoutPath, undefined);
+});
+
+test("invalid and unauthorized CLI invocations make zero model calls", async () => {
+  const base = ["--issue", "19", "--repo", repository];
+  const validLive = [...base, "--output", "/tmp/plan", "--allow-live-api"];
+  const invalid = [
+    [...base, "--output", "--allow-live-api"],
+    [...base, "--output", "/tmp/plan"],
+    [...base, "--output", "/tmp/plan", "--context-path", "--allow-live-api"],
+    [...base, "--output", "/tmp/plan", "--approve-context", "--allow-live-api"],
+    [...validLive, "--allow-live-api"],
+    [...validLive, "--preview-context"],
+    [...validLive, "--output", "/tmp/other"],
+    [...validLive, "--issue", "20"],
+    [...validLive, "--unknown", "value"],
+    [...validLive, "--checkout"],
+    [...validLive, "--checkout", "/checkout", "--approve-context", "token", "--context-path", "src/a.ts"],
+  ];
+  let modelCalls = 0;
+  let issueCalls = 0;
+  for (const args of invalid) {
+    await assert.rejects(main(args, { readIssue: () => { issueCalls++; return issue; },
+      send: (async () => { modelCalls++; throw new Error("Unexpected model call"); }) as typeof fetch }));
+  }
+  assert.equal(issueCalls, 0);
+  assert.equal(modelCalls, 0);
+});
 
 function plannerReply(status: "READY" | "BLOCKED", locator = issueUrl,
   extraKind?: "REPOSITORY" | "CHECK" | "INVESTIGATION", blockedReason = "Missing detail") {

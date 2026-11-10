@@ -33,6 +33,21 @@ test("Issue 26 style file scope ignores unrelated workflow paths", () => {
   assert.deepEqual(selectIssueContext(input(repository, checkoutPath, issueBody)).paths, paths);
 });
 
+test("repeated issue-derived paths cannot create or reuse an approved live selection", async () => {
+  const repository = "putman44/Relay";
+  const { checkoutPath, paths } = fixture(repository);
+  const approved = selectIssueContext(input(repository, checkoutPath, `\`${paths[0]}\``));
+  const repeated = `\`${paths[0]}\` and \`${paths[0]}\``;
+  assert.throws(() => selectIssueContext(input(repository, checkoutPath, repeated)), /Repeated issue paths/);
+  let calls = 0;
+  await assert.rejects(preparePlannerHandoff(26, repository, "fake-key",
+    async () => input(repository, checkoutPath, repeated).issue,
+    (async () => { calls++; throw new Error("Unexpected model call"); }) as typeof fetch,
+    input(repository, checkoutPath, repeated).trustedConfiguration,
+    { checkoutPath, approvalToken: approved.approvalToken }), /Repeated issue paths/);
+  assert.equal(calls, 0);
+});
+
 for (const repository of ["putman44/Relay", "putman44/Parsity"]) {
   test(`${repository}: offline issue paths match manual validated context and require approval`, async () => {
     const { checkoutPath, paths } = fixture(repository);

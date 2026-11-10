@@ -23,6 +23,8 @@ export function selectIssueContext(input: {
   if (!mentions.length || mentions.length > MAX_MENTIONS)
     throw new Error("No bounded explicit source paths; select context paths manually");
   const paths = [...new Set(mentions)];
+  if (paths.length !== mentions.length)
+    throw new Error("Repeated issue paths require human selection; select context paths manually");
   if (paths.length > 8) throw new Error("Too many source candidates; select context paths manually");
 
   const files = loadRepositoryContext(input.checkoutPath, input.repository, paths);
@@ -42,6 +44,6 @@ export function selectIssueContext(input: {
     paths,
     candidates: paths.map((path) => ({ path, reason: "Explicit path in selected issue" })),
     approvalToken,
-    limitations: "Only explicit issue paths were considered; paths are untrusted suggestions. Repeated mentions were collapsed.",
+    limitations: "Only explicit issue paths were considered; paths are untrusted suggestions.",
   };
 }
