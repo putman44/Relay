@@ -64,6 +64,13 @@ for (const repository of ["putman44/Relay", "putman44/Parsity"]) {
     symlinkSync(outside, join(checkoutPath, "src", "linked.ts"));
     writeFileSync(join(checkoutPath, "src", "credential.ts"), "safe");
     writeFileSync(join(checkoutPath, "src", "leak.ts"), "const password = 'abcdefghijk';");
+    const secret = "super-sensitive-value-123";
+    for (const [name, content] of [
+      ["database.ts", `DATABASE_URL=${secret}\n`],
+      ["github.ts", `export const GITHUB_TOKEN = '${secret}';\n`],
+      ["provider.ts", `const provider_refresh_token: "${secret}";\n`],
+      ["aws.ts", `AWS_SECRET_ACCESS_KEY=${secret}\n`],
+    ] as const) writeFileSync(join(checkoutPath, "src", name), content);
     writeFileSync(join(checkoutPath, "src", "large.ts"), "x".repeat(100_001));
     writeFileSync(join(checkoutPath, "src", "binary.ts"), Buffer.from([0, 1]));
     for (const name of ["one", "two", "three"]) writeFileSync(join(checkoutPath, "src", `${name}.ts`), "x".repeat(70_000));
@@ -71,16 +78,30 @@ for (const repository of ["putman44/Relay", "putman44/Parsity"]) {
     for (const selection of [
       { checkoutPath: other, paths: ["src/sample.ts"] },
       ...["../src/sample.ts", "/tmp/outside.ts", "src/linked.ts", "escape/factory-outside-context.ts",
-        "src/credential.ts", "src/leak.ts", "src/large.ts", "src/binary.ts", "src/sample.json"].map((path) => ({ checkoutPath, paths: [path] })),
+        "src/credential.ts", "src/leak.ts", "src/database.ts", "src/github.ts", "src/provider.ts", "src/aws.ts",
+        "src/large.ts", "src/binary.ts", "src/sample.json"].map((path) => ({ checkoutPath, paths: [path] })),
       { checkoutPath, paths: ["src/one.ts", "src/two.ts", "src/three.ts"] },
       { checkoutPath, paths: Array(9).fill("src/sample.ts") },
     ]) {
       const probe = request(repository, selection);
-      await assert.rejects(probe.run());
+      await assert.rejects(probe.run(), (error: Error) => !error.message.includes(secret));
       assert.equal(probe.calls, 0);
     }
   });
 }
+
+test("named pipe selection is rejected before a blocking open or model call", async (t) => {
+  const checkoutPath = fixture("putman44/Relay");
+  try {
+    execFileSync("mkfifo", [join(checkoutPath, "src", "pipe.ts")]);
+  } catch {
+    t.skip("mkfifo is unavailable on this platform");
+    return;
+  }
+  const probe = request("putman44/Relay", { checkoutPath, paths: ["src/pipe.ts"] });
+  await assert.rejects(probe.run(), /Unsupported source file type/);
+  assert.equal(probe.calls, 0);
+});
 
 test("no selection preserves the original request", async () => {
   const probe = request("putman44/Relay");

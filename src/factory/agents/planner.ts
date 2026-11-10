@@ -35,7 +35,8 @@ export const SourceFileSchema = z.strictObject({
       (content) =>
         !/-----BEGIN (?:[A-Z ]*PRIVATE KEY|OPENSSH PRIVATE KEY)-----|(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)["']?\s*[:=]\s*["']?[^\s"']{8,}/i.test(
           content,
-        ),
+        ) &&
+        !/(?:^|[^\w])['"`]?(?:(?:database|db|postgres(?:ql)?)[_-]url|(?:[a-z][a-z0-9_]*[_-])?(?:api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?access[_-]?key|private[_-]?key|password|secret|token))['"`]?\s*[:=]\s*['"`]?[^\s'"`;,}]+/im.test(content),
       "Potential secret in repository content",
     ),
 });

@@ -72,15 +72,17 @@ export function loadRepositoryContext(
     )
       throw new Error("Unsafe or unsupported source path");
     let current = root;
-    for (const part of parts) {
+    for (const [index, part] of parts.entries()) {
       current = join(current, part);
       const stat = lstatSync(current);
       if (stat.isSymbolicLink())
         throw new Error("Symlink source path rejected");
+      if (index === parts.length - 1 && !stat.isFile())
+        throw new Error("Unsupported source file type");
     }
     if (!current.startsWith(root + sep))
       throw new Error("Source path outside checkout");
-    const fd = openSync(current, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const fd = openSync(current, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const stat = fstatSync(fd);
       if (

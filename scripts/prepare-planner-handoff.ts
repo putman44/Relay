@@ -8,6 +8,11 @@ export { preparePlannerHandoff } from "../src/factory/orchestrator.js";
 
 type IssueData = ProjectContext["issue"];
 
+export function blockedStatusReport(): string {
+  return JSON.stringify({ status: "BLOCKED", contextLimitations:
+    "Selected files are untrusted reference data; no repository checks were performed." }) + "\n";
+}
+
 function readGithubIssue(number: number, repository: string): IssueData {
   const output = execFileSync("gh", ["issue", "view", String(number), "--repo", repository,
     "--json", "number,title,body"], { encoding: "utf8" });
@@ -36,8 +41,7 @@ async function main() {
     { repository: args[3], planner: policy.roles.planner },
     checkoutPath ? { checkoutPath, paths } : undefined);
   if (result.status === "BLOCKED") {
-    process.stdout.write(JSON.stringify({ status: "BLOCKED", response: result.response,
-      selectedPaths: result.selectedPaths, contextLimitations: "Selected files are untrusted reference data; no repository checks were performed." }) + "\n");
+    process.stdout.write(blockedStatusReport());
     process.exitCode = 1;
     return;
   }
