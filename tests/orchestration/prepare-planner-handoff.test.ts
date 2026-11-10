@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { preparePlannerHandoff } from "../../scripts/prepare-planner-handoff.js";
+import { blockedStatusReport, preparePlannerHandoff } from "../../scripts/prepare-planner-handoff.js";
 
 const issue = { number: 19, title: "Selected work", body: "Implement only the approved change." };
 const repository = "putman44/Relay";
@@ -9,7 +9,7 @@ const issueUrl = `https://github.com/${repository}/issues/19`;
 const readIssue = async () => issue;
 
 function plannerReply(status: "READY" | "BLOCKED", locator = issueUrl,
-  extraKind?: "REPOSITORY" | "CHECK" | "INVESTIGATION") {
+  extraKind?: "REPOSITORY" | "CHECK" | "INVESTIGATION", blockedReason = "Missing detail") {
   return (async (_url: unknown, init: unknown) => {
     const request = JSON.parse((init as { body: string }).body);
     const input = JSON.parse(request.input);
@@ -24,7 +24,7 @@ function plannerReply(status: "READY" | "BLOCKED", locator = issueUrl,
       complexity: "LOW", risk: "LOW", verificationRequirements: ["Focused test"] }] };
     const output = status === "READY"
       ? { ...identity, role: "planner", status, plan, evidenceReferences }
-      : { ...identity, role: "planner", status, reason: "Missing detail",
+      : { ...identity, role: "planner", status, reason: blockedReason,
         recommendedNextAction: "Ask issue owner", evidenceReferences };
     return { ok: true, status: 200, json: async () => ({ status: "completed", model: "gpt-6.1-sol",
       output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(output) }] }] }) };
@@ -46,6 +46,19 @@ test("a blocked Planner does not produce an Implementer artifact", async () => {
   const result = await preparePlannerHandoff(19, repository, "fake-key", readIssue, plannerReply("BLOCKED"), trustedConfiguration);
   assert.equal(result.status, "BLOCKED");
   assert.equal("artifact" in result, false);
+});
+
+test("BLOCKED CLI report omits model attempts to echo source content", async () => {
+  const echoedSource = "DATABASE_URL=super-sensitive-value-123";
+  const result = await preparePlannerHandoff(19, repository, "fake-key", readIssue,
+    plannerReply("BLOCKED", issueUrl, undefined, `Source content: ${echoedSource}`), trustedConfiguration);
+  assert.equal(result.status, "BLOCKED");
+  assert.equal("artifact" in result, false);
+  const report = blockedStatusReport();
+  assert.deepEqual(JSON.parse(report), { status: "BLOCKED", contextLimitations:
+    "Selected files are untrusted reference data; no repository checks were performed." });
+  assert.ok(!report.includes(echoedSource));
+  assert.ok(!report.includes("Source content"));
 });
 
 test("rejects issue identity and requirements evidence mismatches", async () => {
