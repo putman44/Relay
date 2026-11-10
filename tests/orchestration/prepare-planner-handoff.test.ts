@@ -72,7 +72,7 @@ test("rejects the entire handoff when the tool-free Planner claims unsupported e
   for (const kind of ["REPOSITORY", "CHECK", "INVESTIGATION"] as const) {
     for (const status of ["READY", "BLOCKED"] as const) {
       await assert.rejects(preparePlannerHandoff(19, repository, "fake-key", readIssue,
-        plannerReply(status, issueUrl, kind), trustedConfiguration), /unsupported evidence reference/);
+        plannerReply(status, issueUrl, kind), trustedConfiguration), /PlannerResponseSchema validation failed/);
     }
   }
 });
