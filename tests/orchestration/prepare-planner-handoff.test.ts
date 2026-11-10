@@ -7,7 +7,8 @@ const repository = "putman44/Relay";
 const issueUrl = `https://github.com/${repository}/issues/19`;
 const readIssue = async () => issue;
 
-function plannerReply(status: "READY" | "BLOCKED", locator = issueUrl) {
+function plannerReply(status: "READY" | "BLOCKED", locator = issueUrl,
+  extraKind?: "REPOSITORY" | "CHECK" | "INVESTIGATION") {
   return (async (_url: unknown, init: unknown) => {
     const request = JSON.parse((init as { body: string }).body);
     const input = JSON.parse(request.input);
@@ -15,7 +16,8 @@ function plannerReply(status: "READY" | "BLOCKED", locator = issueUrl) {
     assert.equal(input.issueUrl, issueUrl);
     assert.deepEqual(request.tools, []);
     const identity = input.identity;
-    const evidenceReferences = [{ ...identity, referenceId: "issue", kind: "REQUIREMENTS", locator }];
+    const evidenceReferences = [{ ...identity, referenceId: "issue", kind: "REQUIREMENTS", locator },
+      ...(extraKind ? [{ ...identity, referenceId: "fabricated", kind: extraKind, locator: "unverified/claim" }] : [])];
     const plan = { summary: "Implement the approved change", tasks: [{ taskId: "task-1",
       summary: "Make the scoped edit", dependencies: [], fileScope: ["src/example.ts"],
       complexity: "LOW", risk: "LOW", verificationRequirements: ["Focused test"] }] };
@@ -50,4 +52,13 @@ test("rejects issue identity and requirements evidence mismatches", async () => 
     plannerReply("READY")), /identity mismatch/);
   await assert.rejects(preparePlannerHandoff(19, repository, "fake-key", readIssue,
     plannerReply("READY", "https://github.com/putman44/Relay/issues/20")), /requirements evidence/);
+});
+
+test("rejects the entire handoff when the tool-free Planner claims unsupported evidence", async () => {
+  for (const kind of ["REPOSITORY", "CHECK", "INVESTIGATION"] as const) {
+    for (const status of ["READY", "BLOCKED"] as const) {
+      await assert.rejects(preparePlannerHandoff(19, repository, "fake-key", readIssue,
+        plannerReply(status, issueUrl, kind)), /unsupported evidence reference/);
+    }
+  }
 });

@@ -33,8 +33,9 @@ export async function preparePlannerHandoff(
   const report = await runApiPlanner({ issueBody: issue.body, issueUrl, identity }, apiKey, send);
   if (report.result !== "PASS") throw new Error(`Planner failed validation: ${report.errors.join("; ")}`);
   const response = PlannerResponseSchema.parse(report.response);
-  const requirements = response.evidenceReferences.filter((reference) => reference.kind === "REQUIREMENTS");
-  if (requirements.length === 0 || requirements.some((reference) => reference.locator !== issueUrl))
+  if (response.evidenceReferences.some((reference) => reference.kind !== "REQUIREMENTS"))
+    throw new Error("Planner returned unsupported evidence reference");
+  if (response.evidenceReferences.some((reference) => reference.locator !== issueUrl))
     throw new Error("Planner requirements evidence does not match the selected issue");
   if (response.status === "BLOCKED") return { status: "BLOCKED" as const, response };
   return {
