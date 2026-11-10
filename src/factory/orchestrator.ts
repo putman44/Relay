@@ -1,19 +1,23 @@
 import { createHash, randomUUID } from "node:crypto";
 import { PlannerResponseSchema } from "../orchestration/contracts.js";
 import { runApiPlanner } from "./agents/planner.js";
-import { RepositorySchema, validateProjectContext } from "./project-context.js";
+import { RepositorySchema, TrustedProjectConfigurationSchema, validateProjectContext } from "./project-context.js";
 
 export async function preparePlannerHandoff(
   selectedNumber: number,
   repository: string,
   apiKey: string,
   readIssue: (number: number, repository: string) => Promise<unknown>,
-  send: typeof fetch = fetch,
+  send: typeof fetch,
+  trustedConfiguration: unknown,
 ) {
   if (!Number.isSafeInteger(selectedNumber) || selectedNumber < 1) throw new Error("Select one positive issue number");
   RepositorySchema.parse(repository);
+  const configuration = TrustedProjectConfigurationSchema.parse(trustedConfiguration);
+  if (configuration.repository !== repository) throw new Error("Trusted project configuration repository mismatch");
   const { issue, issueUrl } = validateProjectContext({
     repository, issueNumber: selectedNumber, issue: await readIssue(selectedNumber, repository),
+    trustedConfiguration: configuration,
   });
   const identity = {
     schemaVersion: 1 as const,
@@ -42,4 +46,3 @@ export async function preparePlannerHandoff(
     },
   };
 }
-

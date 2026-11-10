@@ -10,11 +10,13 @@ const fixtures = [
 ] as const;
 
 for (const fixture of fixtures) {
+  const trustedConfiguration = { repository: fixture.repository,
+    planner: { model: "gpt-6.1-sol", reasoningEffort: "medium" } };
   for (const status of ["READY", "BLOCKED"] as const) {
     test(`${fixture.repository} ${status} uses selected issue identity and trusted evidence`, async () => {
       const issueUrl = `https://github.com/${fixture.repository}/issues/${fixture.issue.number}`;
       const context = validateProjectContext({ repository: fixture.repository,
-        issueNumber: fixture.issue.number, issue: fixture.issue });
+        issueNumber: fixture.issue.number, issue: fixture.issue, trustedConfiguration });
       assert.equal(context.issueUrl, issueUrl);
       let calls = 0;
       const send = (async (_url: string, init: RequestInit) => {
@@ -36,7 +38,7 @@ for (const fixture of fixtures) {
           output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(output) }] }] }) };
       }) as typeof fetch;
       const result = await preparePlannerHandoff(fixture.issue.number, fixture.repository, "fake-key",
-        async () => fixture.issue, send);
+        async () => fixture.issue, send, trustedConfiguration);
       assert.equal(calls, 1);
       assert.equal(result.status, status);
       if (result.status === "READY") {
@@ -52,7 +54,8 @@ for (const fixture of fixtures) {
     let calls = 0;
     await assert.rejects(preparePlannerHandoff(fixture.issue.number, fixture.repository, "fake-key",
       async () => ({ ...fixture.issue, number: fixture.issue.number + 1 }),
-      (async () => { calls++; throw new Error("Unexpected model call"); }) as typeof fetch),
+      (async () => { calls++; throw new Error("Unexpected model call"); }) as typeof fetch,
+      trustedConfiguration),
     /identity mismatch/);
     assert.equal(calls, 0);
   });
@@ -74,9 +77,26 @@ for (const fixture of fixtures) {
           output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(output) }] }] }) };
       }) as unknown as typeof fetch;
       await assert.rejects(preparePlannerHandoff(fixture.issue.number, fixture.repository, "fake-key",
-        async () => fixture.issue, send), /unsupported evidence reference/);
+        async () => fixture.issue, send, trustedConfiguration), /unsupported evidence reference/);
     });
   }
+
+  test(`${fixture.repository} rejects invalid or mismatched trusted configuration before issue read`, async () => {
+    let reads = 0;
+    let calls = 0;
+    const readIssue = async () => { reads++; return fixture.issue; };
+    const send = (async () => { calls++; throw new Error("Unexpected model call"); }) as typeof fetch;
+    for (const configuration of [
+      { ...trustedConfiguration, repository: "putman44/Other" },
+      { ...trustedConfiguration, planner: { model: "unapproved", reasoningEffort: "medium" } },
+      { ...trustedConfiguration, planner: { model: "gpt-6.1-sol", reasoningEffort: "low" } },
+      { ...trustedConfiguration, extra: "untrusted" },
+      undefined,
+    ]) await assert.rejects(preparePlannerHandoff(fixture.issue.number, fixture.repository,
+      "fake-key", readIssue, send, configuration));
+    assert.equal(reads, 0);
+    assert.equal(calls, 0);
+  });
 }
 
 test("factory Planner rejects mismatched execution identity before handoff", async () => {

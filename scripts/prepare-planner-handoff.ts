@@ -23,7 +23,8 @@ async function main() {
   if (policy?.roles?.planner?.model !== "gpt-6.1-sol" || policy?.roles?.planner?.reasoningEffort !== "medium")
     throw new Error("API Planner model and effort do not match repository policy");
   const result = await preparePlannerHandoff(Number(args[1]), args[3]!, process.env.OPENAI_API_KEY ?? "",
-    async (number, repository) => readGithubIssue(number, repository));
+    async (number, repository) => readGithubIssue(number, repository), fetch,
+    { repository: args[3], planner: policy.roles.planner });
   if (result.status === "BLOCKED") {
     process.stdout.write(JSON.stringify(result) + "\n");
     process.exitCode = 1;
