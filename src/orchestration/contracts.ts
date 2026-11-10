@@ -22,6 +22,10 @@ export const EvidenceReferenceSchema = ExecutionIdentitySchema.extend({
   commitSha: CommitSha.optional(),
 });
 
+const PlannerEvidenceReferenceSchema = EvidenceReferenceSchema.extend({
+  kind: z.literal("REQUIREMENTS"),
+});
+
 const CommitEvidenceReferenceSchema = EvidenceReferenceSchema.required({
   commitSha: true,
 });
@@ -54,13 +58,13 @@ export const PlannerResponseSchema = z.discriminatedUnion("status", [
       summary: NonEmptyText,
       tasks: z.array(TaskPlanSchema).min(1),
     }),
-    evidenceReferences: z.array(EvidenceReferenceSchema).min(1),
+    evidenceReferences: z.array(PlannerEvidenceReferenceSchema).min(1),
   }),
   ExecutionIdentitySchema.extend({
     role: z.literal("planner"),
     status: z.literal("BLOCKED"),
     reason: NonEmptyText,
-    evidenceReferences: z.array(EvidenceReferenceSchema).min(1),
+    evidenceReferences: z.array(PlannerEvidenceReferenceSchema).min(1),
     recommendedNextAction: NonEmptyText,
   }),
 ]);

@@ -77,7 +77,7 @@ for (const fixture of fixtures) {
           output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify(output) }] }] }) };
       }) as unknown as typeof fetch;
       await assert.rejects(preparePlannerHandoff(fixture.issue.number, fixture.repository, "fake-key",
-        async () => fixture.issue, send, trustedConfiguration), /unsupported evidence reference/);
+        async () => fixture.issue, send, trustedConfiguration), /PlannerResponseSchema validation failed/);
     });
   }
 

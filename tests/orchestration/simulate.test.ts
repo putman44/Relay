@@ -31,7 +31,12 @@ const evidence = (identity: ExecutionIdentity, referenceId: string, commit?: str
   locator: `evidence/${referenceId}`,
   ...(commit === undefined ? {} : { commitSha: commit }),
 });
-const check = (identity: ExecutionIdentity, commit: string) => ({
+const plannerEvidence = (referenceId: string) => ({
+  ...evidence(plannerIdentity, referenceId),
+  kind: "REQUIREMENTS" as const,
+  locator: "https://github.com/putman44/Relay/issues/17",
+});
+const check =(identity: ExecutionIdentity, commit: string) => ({
   ...evidence(identity, "check", commit),
   kind: "CHECK" as const,
   check: "focused tests",
@@ -140,7 +145,7 @@ function fixture(tasks = [proposedTask("a")]): SimulationInput {
         role: "planner",
         status: "READY",
         plan: { summary: "Simulated implementation", tasks },
-        evidenceReferences: [evidence(plannerIdentity, "requirements")],
+        evidenceReferences: [plannerEvidence("requirements")],
       },
     },
     tasks: Object.fromEntries(tasks.map((item) => [item.taskId, taskInput(item.taskId)])),
@@ -172,6 +177,15 @@ test("rejects malformed and stale planner responses before creating task state",
   const malformedResult = simulateOrchestration(malformed);
   assert.equal(malformedResult.failure?.code, "PLANNER_SCHEMA_INVALID");
   assert.deepEqual(Object.keys(malformedResult.states), []);
+
+  const repositoryEvidence = fixture();
+  repositoryEvidence.planner.value = {
+    ...(repositoryEvidence.planner.value as object),
+    evidenceReferences: [evidence(plannerIdentity, "requirements")],
+  };
+  const repositoryEvidenceResult = simulateOrchestration(repositoryEvidence);
+  assert.equal(repositoryEvidenceResult.failure?.code, "PLANNER_SCHEMA_INVALID");
+  assert.deepEqual(Object.keys(repositoryEvidenceResult.states), []);
 
   const stale = fixture();
   stale.planner.context = { ...stale.planner.context, attemptId: "plan-2" };

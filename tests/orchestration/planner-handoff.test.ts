@@ -218,11 +218,10 @@ test("amended requirements cannot retry an uncertain attempt across handoff inst
   assert.equal(calls.filter((call) => Array.isArray(call) && call[0] === "capability").length, 3);
 });
 
-test("READY requires exact issue and repository evidence while permitting other evidence", async () => {
+test("READY requires exact issue and repository evidence", async () => {
   for (const references of [
     [{ ...evidence[0], locator: "https://github.com/putman44/Relay/issues/29" }],
     [{ ...evidence[0], locator: "https://github.com/elsewhere/Relay/issues/28" }],
-    [{ ...evidence[0], kind: "CHECK", locator: "checks/planner" }],
     [evidence[0], { ...evidence[0], locator: "https://github.com/elsewhere/Relay/issues/28" }],
   ]) {
     const { host } = fakeHost({ ...ready, evidenceReferences: references });
@@ -231,10 +230,22 @@ test("READY requires exact issue and repository evidence while permitting other 
     if (result.status === "STOP") assert.equal(result.code, "IDENTITY_MISMATCH");
   }
   const { host } = fakeHost({ ...ready, evidenceReferences: [
-    evidence[0], { ...evidence[0], kind: "CHECK", referenceId: "check-1", locator: "checks/planner" },
-    { ...evidence[0], kind: "INVESTIGATION", referenceId: "investigation-1", locator: "notes/planner" },
+    evidence[0], { ...evidence[0], referenceId: "requirements-2" },
   ] });
   assert.equal((await handoff(host)(context, policy)).status, "READY");
+});
+
+test("unsupported Planner evidence is rejected as a malformed response", async () => {
+  for (const response of [ready, blocked]) {
+    for (const kind of ["REPOSITORY", "CHECK", "INVESTIGATION"]) {
+      const { host } = fakeHost({ ...response, evidenceReferences: [
+        evidence[0], { ...evidence[0], kind, referenceId: "unsupported-1" },
+      ] });
+      const result = await handoff(host)(context, policy);
+      assert.equal(result.status, "STOP");
+      if (result.status === "STOP") assert.equal(result.code, "MALFORMED_RESPONSE");
+    }
+  }
 });
 
 test("unsupported exact settings, missing proof, and absent fresh context stop without dispatch", async () => {
