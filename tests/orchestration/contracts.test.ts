@@ -31,6 +31,11 @@ const evidence = (referenceId: string, withCommit = false) => ({
   locator: "docs/architecture/relay-orchestrator-v2-design.md",
   ...(withCommit ? { commitSha } : {}),
 });
+const plannerEvidence = (referenceId: string) => ({
+  ...evidence(referenceId),
+  kind: "REQUIREMENTS" as const,
+  locator: "https://github.com/putman44/Relay/issues/17",
+});
 const check = () => ({
   ...evidence("check-1", true),
   kind: "CHECK" as const,
@@ -58,7 +63,7 @@ const plannerReady = () => ({
       },
     ],
   },
-  evidenceReferences: [evidence("requirements-1")],
+  evidenceReferences: [plannerEvidence("requirements-1")],
 });
 const implementerCompleted = () => ({
   ...identity,
@@ -117,7 +122,7 @@ test("accepts each role and status with required structure", () => {
       role: "planner",
       status: "BLOCKED",
       reason: "Requirements missing",
-      evidenceReferences: [evidence("block-1")],
+      evidenceReferences: [plannerEvidence("block-1")],
       recommendedNextAction: "Clarify scope",
     },
     implementerCompleted(),
@@ -196,7 +201,7 @@ test("rejects mismatched and stale execution identity against trusted state", ()
 test("rejects evidence from another execution or commit", () => {
   const stalePlanner = {
     ...plannerReady(),
-    evidenceReferences: [{ ...evidence("old"), attemptId: "attempt-0" }],
+    evidenceReferences: [{ ...plannerEvidence("old"), attemptId: "attempt-0" }],
   };
   const wrongImplementerCommit = {
     ...implementerCompleted(),
