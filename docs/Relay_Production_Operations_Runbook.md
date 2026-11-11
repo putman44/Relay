@@ -59,11 +59,26 @@ authentication. It listens only on `127.0.0.1` (port `RELAY_INTAKE_UI_PORT`,
 default `4310`) and serves a form, a review step, and an explicit confirmation
 that creates the prospect through the same intake path as `prospect:add`, with
 the same idempotency, duplicate, and conflict behavior. It writes the database
-configured by `DATABASE_URL`; verify that target before starting it. It does not
-call Firecrawl, OpenAI, Drive, or Gmail and does not start research.
+configured by `DATABASE_URL`; verify that target before starting it. Creating a
+prospect does not call Firecrawl, OpenAI, Drive, or Gmail and does not start
+research.
 
 - The server generates each intake request ID and carries it through review and
   confirmation.
+- The success page offers **Start Research** only for a prospect with a website
+  that is still in the `researching` stage. Selecting it is a provider-using
+  research mutation equivalent to `start-safe`: it runs the same workflow in the
+  intake UI process with `gmail_draft_allowed = false`, so it calls Firecrawl,
+  OpenAI, and Drive and finishes in `research_review` without calling Gmail. It
+  needs the same research configuration as `npm run research`.
+- A prospect that already has a research request is never started again. The
+  research status page (`/research?prospectId=PROSPECT_UUID`) shows the durable
+  request state as running, completed, or needing review. A request left in a
+  running state by an interrupted process is not resumed by the UI; use the
+  research commands below.
+- Stopping the intake UI waits for research it is running to finish. A second
+  Ctrl+C exits immediately and can leave that request needing `resume` or
+  reconciliation.
 - A conflict page means nothing was created or changed. Inspect the intake; do
   not change the request ID or input to get past it.
 - An "outcome unknown" page means Relay could not confirm the result. Return to

@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const SPECIFIER = /\b(?:from\s*|import\s*\(\s*|import\s+)["']([^"']+)["']/g;
+// Specifier characters only, so quoted text after an ordinary "from" in code is not read as an import.
+const SPECIFIER = /\b(?:from\s*|import\s*\(\s*|import\s+)["']([\w@./:-]+)["']/g;
 
 // Static import closure of a module, read from source without executing it.
 function importClosure(entry: string): { modules: string[]; packages: string[] } {
@@ -30,18 +31,35 @@ function importClosure(entry: string): { modules: string[]; packages: string[] }
   return { modules: [...modules].sort(), packages: [...packages].sort() };
 }
 
-test("Intake UI process loads only intake, page, and database modules: no provider code", () => {
+test("Intake UI process loads only intake, page, database, and research modules: no Gmail runtime, sender, or worker code", () => {
   const { modules, packages } = importClosure("scripts/run-intake-ui.ts");
+  // Start Research needs the research workflow with its Firecrawl, OpenAI, and Drive providers.
+  // The Gmail entries are the OAuth client Drive shares and modules reached only through type imports.
   assert.deepEqual(modules, [
     "scripts/run-intake-ui.ts",
     "src/db.ts",
+    "src/gmail/gmail-auth.ts",
+    "src/gmail/gmail-draft-creator.ts",
+    "src/gmail/gmail-message-reader.ts",
     "src/intake/prospect-intake.ts",
+    "src/outreach/outreach-draft-content.ts",
+    "src/outreach/reply-context.ts",
     "src/outreach/types/prospect-stages.ts",
+    "src/research/drive-artifacts.ts",
+    "src/research/firecrawl-scraper.ts",
+    "src/research/openai-researcher.ts",
+    "src/research/prospect-research.ts",
     "src/research/research-evidence.ts",
+    "src/research/research-result.ts",
     "src/web/intake-pages.ts",
+    "src/web/intake-research.ts",
     "src/web/intake-server.ts",
   ]);
-  assert.deepEqual(packages, ["dotenv/config", "node:crypto", "node:http", "node:net", "pg"]);
+  // Nothing that builds a Gmail client for drafts or sending, and no job or worker code, may be reachable.
+  assert.deepEqual(modules.filter(path => /gmail-runtime|sender|^src\/jobs\/|worker/.test(path)), []);
+  assert.deepEqual(packages, [
+    "dotenv/config", "googleapis", "node:crypto", "node:http", "node:net", "node:stream", "pg", "postal-mime",
+  ]);
 });
 
 test("Intake UI process hides unexpected startup error details", () => {

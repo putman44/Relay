@@ -1148,15 +1148,17 @@ reusing a non-null website identity with different input, fails closed.
 | `tests/intake/prospect-intake-input.test.ts` | Strict normalized input, explicit CLI confirmation, rejection of unsafe URLs, invalid email, and unknown fields, and JSON parse errors that do not echo intake input |
 | `tests/intake/prospect-intake.test.ts` | Migration 012, atomic prospect/journal creation, authoritative duplicate request ID, concurrent convergence, and request-ID/identity conflict rejection |
 | `tests/intake/prospect-intake-conflict.test.ts` | Typed conflict errors for request-ID, identity, and legacy-site conflicts with rollback and no insert, and database failures not reported as conflicts |
-| `tests/web/intake-server.test.ts` | Operator intake UI: server-generated request ID, review before creation, explicit confirmation, validation, conflict, and unknown-outcome pages without leaked input or internal errors, HTML escaping, loopback Host/Origin enforcement, body-size and form limits, and loopback-only binding |
+| `tests/web/intake-server.test.ts` | Operator intake UI: server-generated request ID, review before creation, explicit confirmation, validation, conflict, and unknown-outcome pages without leaked input or internal errors, HTML escaping, loopback Host/Origin enforcement, body-size and form limits, and loopback-only binding. Start Research: offered only for a researchable prospect still awaiting research, never started by prospect creation, explicit confirmation, launched once in the background, never started when a research request exists or its state cannot be read, status pages for running, completed, and needs-review states, and the same Host/Origin and strict-form protections |
 | `tests/web/intake-pages.test.ts` | HTML escaping and a content security policy that allows only the inline stylesheet |
-| `tests/web/intake-ui-boundary.test.ts` | The intake UI process imports no provider modules |
+| `tests/web/intake-research.test.ts` | Intake-initiated research calls the existing workflow with `gmailDraftAllowed: false` and a Gmail draft creator that always throws, builds no provider client for a status read, and lets shutdown wait for running research |
+| `tests/web/intake-ui-boundary.test.ts` | The intake UI process imports only intake, page, database, and research modules: no Gmail runtime, sender, job, or worker code |
 | `tests/data/canonical-data-foundation.test.ts` | Migration 014, research document/chunk persistence, prospect and source-URL relational constraints, null-only embeddings until a dimension is selected, and inbound/outbound communication persistence |
 
 The database-backed intake test uses fake/local inputs and a unique schema on
 the guarded disposable `relay_test` database. It does not call any external
-provider. The conflict and web tests use a scripted in-memory pool or a fake
-intake function on a loopback ephemeral port; they use no database or provider.
+provider. The conflict and web tests use a scripted in-memory pool or fake
+intake and research functions on a loopback ephemeral port; they use no
+database or provider.
 
 ## Prospect research migrations
 

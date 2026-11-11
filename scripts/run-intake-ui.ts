@@ -1,6 +1,7 @@
 import "dotenv/config";
 import type { Server } from "node:http";
 import { createProspectFromIntake } from "../src/intake/prospect-intake.js";
+import { createIntakeResearch } from "../src/web/intake-research.js";
 import {
   INTAKE_UI_HOST,
   parseIntakeUiPort,
@@ -18,11 +19,14 @@ async function main(): Promise<void> {
   db.on("error", (error) =>
     log({ event: "database_pool_error", error: error.name, code: (error as { code?: unknown }).code }));
 
+  // Research runs only when an operator selects Start Research, and never creates a Gmail draft.
+  const research = createIntakeResearch(db);
   let server: Server;
   try {
     server = await startIntakeServer({
       port,
       createProspect: (input) => createProspectFromIntake(input, db),
+      research,
       log,
     });
   } catch (error) {
@@ -31,15 +35,17 @@ async function main(): Promise<void> {
   }
   console.log(`Relay intake UI listening on http://${INTAKE_UI_HOST}:${port}/ (loopback only).`);
   console.log("Confirmed prospects are written to the database configured by DATABASE_URL. Press Ctrl+C to stop.");
+  console.log("Start Research calls Firecrawl, OpenAI, and Google Drive for that prospect; nothing calls them before then.");
 
   // A second signal falls through to Node's default handler and exits immediately.
   let stopping = false;
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
-    console.log("Stopping Relay intake UI after in-flight requests finish.");
+    console.log("Stopping Relay intake UI after in-flight requests and running research finish.");
     server.close(() => {
-      db.end().catch(() => {
+      // Closing the pool under running research would strand its request mid-checkpoint.
+      research.idle().then(() => db.end()).catch(() => {
         process.exitCode = 1;
       });
     });

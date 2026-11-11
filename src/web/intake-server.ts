@@ -23,7 +23,16 @@ import {
   renderIntakeOutcomeUnknown,
   renderIntakeReview,
   renderIntakeSuccess,
+  renderResearchStatus,
+  RESEARCH_CONFIRM_VALUE,
+  RESEARCH_PROSPECT_FIELD,
+  RESEARCH_START_PATH,
+  RESEARCH_STATUS_PATH,
+  researchStatusPath,
   type IntakeFormValues,
+  type LocalResearchRun,
+  type ResearchOffer,
+  type ResearchSummary,
 } from "./intake-pages.js";
 
 // v1 is a loopback-only operator tool; the bind address is deliberately not configurable.
@@ -39,10 +48,21 @@ export type IntakeServerEvent =
     }
   | { event: "intake_conflict"; requestId: string }
   | { event: "intake_outcome_unknown"; requestId: string; error: string }
+  | { event: "research_requested"; prospectId: string }
+  | { event: "research_finished"; prospectId: string; status: string }
+  | { event: "research_stopped"; prospectId: string; error: string }
   | { event: "request_failed"; error: string };
+
+export type IntakeResearchDependencies = {
+  // Settles when the whole research workflow ends; the server never awaits it inside a request.
+  start: (prospectId: string) => Promise<ResearchSummary>;
+  getRequest: (prospectId: string) => Promise<ResearchSummary | null>;
+};
 
 export type IntakeServerDependencies = {
   createProspect: (input: ProspectIntakeInput) => Promise<ProspectIntakeResult>;
+  // Without this the UI offers no research action and serves no research routes.
+  research?: IntakeResearchDependencies;
   generateRequestId?: () => string;
   log?: (event: IntakeServerEvent) => void;
 };
@@ -62,6 +82,8 @@ const PAGE_HEADERS: OutgoingHttpHeaders = {
 };
 const PROSPECT_FORM_FIELDS = new Set<string>(INTAKE_FIELDS);
 const CONFIRMED_FORM_FIELDS = new Set<string>([...INTAKE_FIELDS, INTAKE_CONFIRM_FIELD]);
+const RESEARCH_FORM_FIELDS = new Set<string>([RESEARCH_PROSPECT_FIELD, INTAKE_CONFIRM_FIELD]);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export function parseIntakeUiPort(value: string | undefined): number {
   if (value === undefined) return DEFAULT_INTAKE_UI_PORT;
@@ -169,12 +191,12 @@ function parseForm(body: Buffer, allowed: ReadonlySet<string>): Map<string, stri
   return fields;
 }
 
-async function readForm(
+async function readFields(
   req: IncomingMessage,
   res: ServerResponse,
   host: string,
   allowed: ReadonlySet<string>,
-): Promise<SubmittedForm | null> {
+): Promise<Map<string, string> | null> {
   if (!isSameOriginPost(req, host)) {
     sendError(res, 403, "Request rejected",
       "Relay accepts this form only from its own pages at a loopback address. Nothing was created.");
@@ -197,6 +219,17 @@ async function readForm(
       "Relay could not read this form submission. Nothing was created.");
     return null;
   }
+  return fields;
+}
+
+async function readForm(
+  req: IncomingMessage,
+  res: ServerResponse,
+  host: string,
+  allowed: ReadonlySet<string>,
+): Promise<SubmittedForm | null> {
+  const fields = await readFields(req, res, host, allowed);
+  if (!fields) return null;
   const values: IntakeFormValues = {};
   for (const name of INTAKE_FIELDS) {
     const value = fields.get(name);
@@ -246,7 +279,100 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
       requestId: result.requestId,
       prospectId: result.prospectId,
     });
-    sendPage(res, result.created ? 201 : 200, renderIntakeSuccess(result, input.requestId));
+    // Only a prospect still awaiting research is offered the action; the start recheck is durable.
+    const offer: ResearchOffer = !dependencies.research
+      ? "none"
+      : result.stage !== "researching"
+        ? "status"
+        : input.website === null
+          ? "no-website"
+          : "start";
+    sendPage(res, result.created ? 201 : 200, renderIntakeSuccess(result, input.requestId, offer));
+  }
+
+  function researchRoutes(research: IntakeResearchDependencies): [string, Route][] {
+    // Research this process is running, or whose last start here stopped. Postgres stays authoritative:
+    // the workflow's row lock and unique request reject any duplicate this map cannot see.
+    const runs = new Map<string, Exclude<LocalResearchRun, "idle">>();
+
+    // Not awaited: the response returns at once and the status page reads the durable request.
+    function launch(prospectId: string): void {
+      log({ event: "research_requested", prospectId });
+      Promise.resolve()
+        .then(() => research.start(prospectId))
+        .then(
+          (request) => {
+            runs.delete(prospectId);
+            log({ event: "research_finished", prospectId, status: request.status });
+          },
+          (error: unknown) => {
+            runs.set(prospectId, "stopped");
+            log({ event: "research_stopped", prospectId, error: errorKind(error) });
+          },
+        );
+    }
+
+    async function startResearch(prospectId: string, res: ServerResponse): Promise<void> {
+      if (runs.get(prospectId) !== "running") {
+        // Claim before the first await so a repeated submission cannot launch twice.
+        runs.set(prospectId, "running");
+        let existing: ResearchSummary | null;
+        try {
+          existing = await research.getRequest(prospectId);
+        } catch (error) {
+          runs.delete(prospectId);
+          log({ event: "request_failed", error: errorKind(error) });
+          sendError(res, 500, "Research not started",
+            "Relay could not check this prospect's research state, so research was not started.");
+          return;
+        }
+        if (existing) runs.delete(prospectId);
+        else launch(prospectId);
+      }
+      res.writeHead(303, {
+        ...PAGE_HEADERS,
+        "content-length": 0,
+        location: researchStatusPath(prospectId),
+      });
+      res.end();
+    }
+
+    return [
+      [RESEARCH_START_PATH, {
+        method: "POST",
+        handle: async (req, res, host) => {
+          const fields = await readFields(req, res, host, RESEARCH_FORM_FIELDS);
+          if (!fields) return;
+          if (fields.get(INTAKE_CONFIRM_FIELD) !== RESEARCH_CONFIRM_VALUE) {
+            sendError(res, 400, "Confirmation required",
+              "Research starts only from the Start Research button. Research was not started.");
+            return;
+          }
+          const prospectId = fields.get(RESEARCH_PROSPECT_FIELD)?.toLowerCase() ?? "";
+          if (!UUID.test(prospectId)) {
+            sendError(res, 400, "Research not started",
+              "This submission does not identify a prospect. Research was not started.");
+            return;
+          }
+          await startResearch(prospectId, res);
+        },
+      }],
+      [RESEARCH_STATUS_PATH, {
+        method: "GET",
+        handle: async (req, res) => {
+          const query = new URLSearchParams((req.url ?? "").split("?", 2)[1] ?? "");
+          const prospectId = query.get(RESEARCH_PROSPECT_FIELD)?.toLowerCase() ?? "";
+          if (!UUID.test(prospectId)) {
+            sendError(res, 400, "Research status unavailable", "This link does not identify a prospect.");
+            return;
+          }
+          // Read the local run first: the durable read that follows can only be newer.
+          const local = runs.get(prospectId) ?? "idle";
+          const request = await research.getRequest(prospectId);
+          sendPage(res, 200, renderResearchStatus({ prospectId, request, local }));
+        },
+      }],
+    ];
   }
 
   const routes = new Map<string, Route>([
@@ -295,6 +421,7 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
         if (input) await createProspect(input, res);
       },
     }],
+    ...(dependencies.research ? researchRoutes(dependencies.research) : []),
   ]);
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {

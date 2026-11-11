@@ -12,10 +12,12 @@ import {
   type ProspectIntakeInput,
   type ProspectIntakeResult,
 } from "../../src/intake/prospect-intake.js";
+import type { ResearchSummary } from "../../src/web/intake-pages.js";
 import {
   MAX_INTAKE_FORM_BYTES,
   parseIntakeUiPort,
   startIntakeServer,
+  type IntakeResearchDependencies,
   type IntakeServerDependencies,
   type IntakeServerEvent,
 } from "../../src/web/intake-server.js";
@@ -166,6 +168,66 @@ function hiddenFields(html: string): Record<string, string> {
   }
   return fields;
 }
+
+const RESEARCH_ID = "3e9a1c57-2b6d-4f80-9a1e-5c7d2f4b6a90";
+const STATUS_PATH = `/research?prospectId=${PROSPECT_ID}`;
+const START_FORM = /<form [^>]*method="post" action="\/research\/start"/;
+const REFRESH = '<meta http-equiv="refresh"';
+const summary = (
+  status: ResearchSummary["status"],
+  overrides: Partial<ResearchSummary> = {},
+): ResearchSummary => ({
+  id: RESEARCH_ID,
+  status,
+  updated_at: new Date("2026-11-11T10:00:00.000Z"),
+  last_error: null,
+  brief_url: null,
+  ...overrides,
+});
+
+// A scripted research workflow: each start stays pending until the test settles it,
+// and `stored` plays the durable research request. No database or provider is involved.
+function fakeResearch(initial: ResearchSummary | null = null) {
+  const started: string[] = [];
+  let stored = initial;
+  let pending!: {
+    resolve: (request: ResearchSummary) => void;
+    reject: (error: unknown) => void;
+  };
+  const research: IntakeResearchDependencies = {
+    getRequest: async () => stored,
+    start: (prospectId) => {
+      started.push(prospectId);
+      return new Promise((resolve, reject) => {
+        pending = { resolve, reject };
+      });
+    },
+  };
+  return {
+    research,
+    started,
+    store: (request: ResearchSummary) => {
+      stored = request;
+    },
+    finish: (request: ResearchSummary) => {
+      stored = request;
+      pending.resolve(request);
+    },
+    fail: (error: unknown) => pending.reject(error),
+  };
+}
+
+const confirmedResearch = (prospectId: string) => ({
+  prospectId,
+  confirm: "start-research-only",
+});
+const startResearch = (
+  harness: Harness,
+  fields: Record<string, string> | string = confirmedResearch(PROSPECT_ID),
+  headers: Record<string, string | undefined> = {},
+) => post(harness, "/research/start", fields, headers);
+const researchStatus = (harness: Harness, path = STATUS_PATH) =>
+  send(harness.port, { path });
 
 function assertNoSubmittedInput(body: string): void {
   for (const marker of [
@@ -656,4 +718,404 @@ test("Intake UI: the port setting accepts only explicit TCP ports", () => {
       JSON.stringify(value),
     );
   }
+});
+
+test("Intake UI: the success page offers Start Research for a new prospect without starting it", async (t) => {
+  const fake = fakeResearch();
+  const harness = await startHarness(t, { research: fake.research });
+  const reply = await post(harness, "/prospects", confirmed(rawFields));
+  assert.equal(reply.status, 201);
+  assert.match(reply.body, START_FORM);
+  assert.ok(
+    reply.body.includes(
+      '<button type="submit" name="confirm" value="start-research-only">Start Research</button>',
+    ),
+  );
+  assert.deepEqual(hiddenFields(reply.body), { prospectId: PROSPECT_ID });
+  assert.ok(reply.body.includes("It does not create or send email."));
+  assert.deepEqual(fake.started, []);
+  assert.deepEqual(harness.events, [
+    { event: "intake_created", requestId: REQUEST_ID, prospectId: PROSPECT_ID },
+  ]);
+});
+
+test("Intake UI: Start Research is offered only while a researchable prospect still awaits research", async (t) => {
+  const unconfigured = await startHarness(t);
+  const plain = await post(unconfigured, "/prospects", confirmed(rawFields));
+  assert.equal(plain.status, 201);
+  assert.ok(!plain.body.includes("/research"));
+  assert.ok(!plain.body.includes("Start Research"));
+
+  const fake = fakeResearch();
+  const harness = await startHarness(t, { research: fake.research });
+  const noWebsite = await post(
+    harness,
+    "/prospects",
+    confirmed({ ...rawFields, website: "" }),
+  );
+  assert.equal(noWebsite.status, 201);
+  assert.doesNotMatch(noWebsite.body, START_FORM);
+  assert.ok(noWebsite.body.includes("Research needs a website"));
+
+  for (const stage of [
+    "research_in_progress",
+    "research_review",
+    "needs_contact",
+    "draft_ready",
+  ] as const) {
+    const researched = await startHarness(t, {
+      research: fake.research,
+      createProspect: async (input) => ({
+        requestId: input.requestId,
+        prospectId: PROSPECT_ID,
+        stage,
+        created: false,
+      }),
+    });
+    const reply = await post(researched, "/prospects", confirmed(rawFields));
+    assert.equal(reply.status, 200);
+    assert.doesNotMatch(reply.body, START_FORM, stage);
+    assert.ok(!reply.body.includes("Start Research"), stage);
+    assert.ok(reply.body.includes(`<a href="${STATUS_PATH}">`), stage);
+  }
+
+  const recorded = await startHarness(t, {
+    research: fake.research,
+    createProspect: async (input) => ({
+      requestId: input.requestId,
+      prospectId: PROSPECT_ID,
+      stage: "researching",
+      created: false,
+    }),
+  });
+  const again = await post(recorded, "/prospects", confirmed(rawFields));
+  assert.equal(again.status, 200);
+  assert.match(again.body, START_FORM);
+  assert.deepEqual(fake.started, []);
+});
+
+test("Intake UI: Start Research launches the workflow once in the background and redirects to its status", async (t) => {
+  const fake = fakeResearch();
+  const harness = await startHarness(t, { research: fake.research });
+
+  // Both replies arrive while the workflow is still pending: the request never waits for research.
+  const replies = await Promise.all([
+    startResearch(harness),
+    startResearch(harness),
+  ]);
+  for (const reply of replies) {
+    assert.equal(reply.status, 303);
+    assert.equal(reply.headers.location, STATUS_PATH);
+    assert.equal(reply.headers["cache-control"], "no-store");
+    assert.equal(reply.body, "");
+  }
+  assert.deepEqual(fake.started, [PROSPECT_ID]);
+
+  const starting = await researchStatus(harness);
+  assert.equal(starting.status, 200);
+  assert.equal(starting.headers["cache-control"], "no-store");
+  assert.ok(
+    String(starting.headers["content-security-policy"]).includes(
+      "default-src 'none'",
+    ),
+  );
+  assert.ok(starting.body.includes("<h1>Research is running</h1>"));
+  assert.ok(starting.body.includes(REFRESH));
+  assert.doesNotMatch(starting.body, START_FORM);
+
+  fake.store(summary("researching"));
+  const running = await researchStatus(harness);
+  assert.ok(running.body.includes("<h1>Research is running</h1>"));
+  assert.ok(running.body.includes("<code>researching</code>"));
+  assert.ok(running.body.includes(RESEARCH_ID));
+  assert.ok(running.body.includes(REFRESH));
+  assert.ok(!running.body.includes("not running this research"));
+  assert.doesNotMatch(running.body, START_FORM);
+  assert.equal((await startResearch(harness)).status, 303);
+  assert.deepEqual(fake.started, [PROSPECT_ID]);
+
+  fake.finish(
+    summary("research_review", {
+      brief_url: "https://docs.google.com/document/d/brief123/edit",
+    }),
+  );
+  const done = await researchStatus(harness);
+  assert.ok(done.body.includes("<h1>Research completed</h1>"));
+  assert.ok(done.body.includes("<code>research_review</code>"));
+  assert.ok(done.body.includes("No Gmail draft was created."));
+  assert.ok(
+    done.body.includes(
+      '<a href="https://docs.google.com/document/d/brief123/edit" rel="noreferrer">',
+    ),
+  );
+  assert.ok(!done.body.includes(REFRESH));
+  assert.doesNotMatch(done.body, START_FORM);
+  assert.equal((await startResearch(harness)).status, 303);
+  assert.deepEqual(fake.started, [PROSPECT_ID]);
+  assert.deepEqual(harness.events, [
+    { event: "research_requested", prospectId: PROSPECT_ID },
+    {
+      event: "research_finished",
+      prospectId: PROSPECT_ID,
+      status: "research_review",
+    },
+  ]);
+});
+
+test("Intake UI: Start Research never starts a prospect that already has research", async (t) => {
+  for (const status of [
+    "researching",
+    "brief_ready",
+    "research_review",
+    "completed",
+    "failed",
+    "needs_reconciliation",
+  ] as const) {
+    const fake = fakeResearch(summary(status));
+    const harness = await startHarness(t, { research: fake.research });
+    const reply = await startResearch(harness);
+    assert.equal(reply.status, 303, status);
+    assert.equal(reply.headers.location, STATUS_PATH);
+    assert.deepEqual(fake.started, [], status);
+    assert.deepEqual(harness.events, [], status);
+    assert.doesNotMatch((await researchStatus(harness)).body, START_FORM);
+  }
+});
+
+test("Intake UI: the research status page reports running, completed, and needs-review states", async (t) => {
+  const states = [
+    ["researching", "Research is running"],
+    ["research_ready", "Research is running"],
+    ["folder_creating", "Research is running"],
+    ["folder_ready", "Research is running"],
+    ["brief_creating", "Research is running"],
+    ["brief_ready", "Research is running"],
+    ["draft_creating", "Research is running"],
+    ["research_review", "Research completed"],
+    ["needs_contact", "Research completed"],
+    ["completed", "Research completed"],
+    ["failed", "Research needs review"],
+    ["needs_reconciliation", "Research needs review"],
+  ] as const;
+  for (const [status, heading] of states) {
+    const fake = fakeResearch(summary(status));
+    const harness = await startHarness(t, { research: fake.research });
+    const reply = await researchStatus(harness);
+    assert.equal(reply.status, 200, status);
+    assert.ok(reply.body.includes(`<h1>${heading}</h1>`), status);
+    assert.ok(reply.body.includes(`<code>${status}</code>`), status);
+    assert.ok(reply.body.includes(PROSPECT_ID), status);
+    assert.ok(reply.body.includes("2026-11-11T10:00:00.000Z"), status);
+    assert.doesNotMatch(reply.body, START_FORM, status);
+    // This process did not start the research, so it neither polls nor claims to be running it.
+    assert.ok(!reply.body.includes(REFRESH), status);
+    assert.equal(
+      reply.body.includes("not running this research"),
+      heading === "Research is running",
+      status,
+    );
+    assert.deepEqual(fake.started, []);
+  }
+
+  const failed = fakeResearch(
+    summary("failed", {
+      last_error: "Research result validation failed: <b>contact</b>.",
+      brief_url: "javascript:alert(1)",
+    }),
+  );
+  const harness = await startHarness(t, { research: failed.research });
+  const reply = await researchStatus(harness);
+  assert.ok(
+    reply.body.includes(
+      "Research result validation failed: &lt;b&gt;contact&lt;/b&gt;.",
+    ),
+  );
+  assert.ok(!reply.body.includes("<b>contact</b>"));
+  assert.ok(!reply.body.includes("javascript:"));
+
+  const none = await startHarness(t, { research: fakeResearch().research });
+  const idle = await researchStatus(none);
+  assert.equal(idle.status, 200);
+  assert.ok(idle.body.includes("<h1>Research not started</h1>"));
+  // Eligibility is unknown here, so the status page never offers the action.
+  assert.doesNotMatch(idle.body, START_FORM);
+  assert.ok(!idle.body.includes("Start Research"));
+  assert.ok(!idle.body.includes(REFRESH));
+});
+
+test("Intake UI: the status page hides a stale last_error while research runs or after it completes", async (t) => {
+  const stale = "Earlier attempt: provider timed out.";
+  for (const status of ["researching", "brief_ready", "research_review", "completed"] as const) {
+    const fake = fakeResearch(summary(status, { last_error: stale }));
+    const harness = await startHarness(t, { research: fake.research });
+    const reply = await researchStatus(harness);
+    assert.equal(reply.status, 200, status);
+    assert.ok(!reply.body.includes(stale), status);
+  }
+  for (const status of ["failed", "needs_reconciliation"] as const) {
+    const fake = fakeResearch(summary(status, { last_error: stale }));
+    const harness = await startHarness(t, { research: fake.research });
+    assert.ok((await researchStatus(harness)).body.includes(stale), status);
+  }
+});
+
+test("Intake UI: a start that stops before recording a request is reported without internal details", async (t) => {
+  const fake = fakeResearch();
+  const harness = await startHarness(t, { research: fake.research });
+  assert.equal((await startResearch(harness)).status, 303);
+  fake.fail(new Error("FIRECRAWL_API_KEY is required. key=secret-internal"));
+
+  const reply = await researchStatus(harness);
+  assert.equal(reply.status, 200);
+  assert.ok(reply.body.includes("<h1>Research did not start</h1>"));
+  assert.ok(reply.body.includes("recorded no research request"));
+  assert.ok(!reply.body.includes("FIRECRAWL_API_KEY"));
+  assert.ok(!reply.body.includes("secret-internal"));
+  assert.ok(!reply.body.includes(REFRESH));
+  assert.deepEqual(harness.events, [
+    { event: "research_requested", prospectId: PROSPECT_ID },
+    { event: "research_stopped", prospectId: PROSPECT_ID, error: "Error" },
+  ]);
+
+  // The status page offers no button, but the start route still rechecks durable state on an explicit POST.
+  assert.doesNotMatch(reply.body, START_FORM);
+  assert.equal((await startResearch(harness)).status, 303);
+  assert.deepEqual(fake.started, [PROSPECT_ID, PROSPECT_ID]);
+});
+
+test("Intake UI: research that stops after recording a request needs review and cannot be restarted", async (t) => {
+  const fake = fakeResearch();
+  const harness = await startHarness(t, { research: fake.research });
+  assert.equal((await startResearch(harness)).status, 303);
+  fake.store(
+    summary("failed", {
+      last_error: "Research or provider failed; inspect before new work.",
+    }),
+  );
+  fake.fail(new Error("Research request failed validation or collection."));
+
+  const reply = await researchStatus(harness);
+  assert.ok(reply.body.includes("<h1>Research needs review</h1>"));
+  assert.ok(
+    reply.body.includes("Research or provider failed; inspect before new work."),
+  );
+  assert.ok(!reply.body.includes(REFRESH));
+  assert.doesNotMatch(reply.body, START_FORM);
+  assert.equal((await startResearch(harness)).status, 303);
+  assert.deepEqual(fake.started, [PROSPECT_ID]);
+});
+
+test("Intake UI: research routes keep the loopback, same-origin, and strict form protections", async (t) => {
+  const fake = fakeResearch();
+  const harness = await startHarness(t, { research: fake.research });
+  const rejected: Record<string, string | undefined>[] = [
+    { origin: "https://evil.example" },
+    { origin: undefined },
+    { origin: "null" },
+    { origin: `http://localhost:${harness.port}` },
+    { "sec-fetch-site": "cross-site" },
+    { "sec-fetch-site": "same-site" },
+    {
+      host: `evil.example:${harness.port}`,
+      origin: `http://evil.example:${harness.port}`,
+    },
+  ];
+  for (const headers of rejected) {
+    const reply = await startResearch(harness, undefined, headers);
+    assert.equal(reply.status, 403, JSON.stringify(headers));
+  }
+  const rebound = await send(harness.port, {
+    path: STATUS_PATH,
+    headers: { host: `evil.example:${harness.port}` },
+  });
+  assert.equal(rebound.status, 403);
+
+  const json = await startResearch(
+    harness,
+    JSON.stringify(confirmedResearch(PROSPECT_ID)),
+    { "content-type": "application/json" },
+  );
+  assert.equal(json.status, 415);
+  const malformed: (Record<string, string> | string)[] = [
+    {},
+    { prospectId: PROSPECT_ID },
+    { prospectId: PROSPECT_ID, confirm: "create-prospect" },
+    confirmedResearch("not-a-prospect"),
+    confirmedResearch(`${PROSPECT_ID}0`),
+    { ...confirmedResearch(PROSPECT_ID), companyName: "Dev By Taylor" },
+    `${new URLSearchParams(confirmedResearch(PROSPECT_ID))}&prospectId=${PROSPECT_ID}`,
+  ];
+  for (const fields of malformed) {
+    const reply = await startResearch(harness, fields);
+    assert.equal(reply.status, 400, JSON.stringify(fields));
+  }
+
+  for (const [method, path, allow] of [
+    ["GET", "/research/start", "POST"],
+    ["POST", STATUS_PATH, "GET"],
+  ] as const) {
+    const reply = await send(harness.port, {
+      method,
+      path,
+      headers: { origin: harness.origin },
+    });
+    assert.equal(reply.status, 405, `${method} ${path}`);
+    assert.equal(reply.headers.allow, allow);
+  }
+  for (const path of [
+    "/research",
+    "/research?prospectId=not-a-prospect",
+    `/research?prospect=${PROSPECT_ID}`,
+  ]) {
+    assert.equal((await researchStatus(harness, path)).status, 400, path);
+  }
+  assert.deepEqual(fake.started, []);
+  assert.deepEqual(harness.events, []);
+
+  // Same-origin requests through the localhost name remain usable, and the ID is normalized.
+  const local = await startResearch(
+    harness,
+    confirmedResearch(PROSPECT_ID.toUpperCase()),
+    {
+      host: `localhost:${harness.port}`,
+      origin: `http://localhost:${harness.port}`,
+      "sec-fetch-site": undefined,
+    },
+  );
+  assert.equal(local.status, 303);
+  assert.equal(local.headers.location, STATUS_PATH);
+  assert.deepEqual(fake.started, [PROSPECT_ID]);
+
+  const unconfigured = await startHarness(t);
+  assert.equal((await startResearch(unconfigured)).status, 404);
+  assert.equal((await researchStatus(unconfigured)).status, 404);
+});
+
+test("Intake UI: research is not started when its durable state cannot be read", async (t) => {
+  const started: string[] = [];
+  const harness = await startHarness(t, {
+    research: {
+      getRequest: async () => {
+        throw new Error("connection failed for private.contact@devbytaylor.com");
+      },
+      start: async (prospectId) => {
+        started.push(prospectId);
+        return summary("research_review");
+      },
+    },
+  });
+  const start = await startResearch(harness);
+  assert.equal(start.status, 500);
+  assert.ok(start.body.includes("research was not started"));
+  const status = await researchStatus(harness);
+  assert.equal(status.status, 500);
+  for (const body of [start.body, status.body]) {
+    assert.ok(!body.includes("connection failed"));
+    assertNoSubmittedInput(body);
+  }
+  assert.deepEqual(started, []);
+  assert.deepEqual(harness.events, [
+    { event: "request_failed", error: "Error" },
+    { event: "request_failed", error: "Error" },
+  ]);
 });
