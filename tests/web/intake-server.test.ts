@@ -937,9 +937,26 @@ test("Intake UI: the research status page reports running, completed, and needs-
   const idle = await researchStatus(none);
   assert.equal(idle.status, 200);
   assert.ok(idle.body.includes("<h1>Research not started</h1>"));
-  assert.match(idle.body, START_FORM);
-  assert.deepEqual(hiddenFields(idle.body), { prospectId: PROSPECT_ID });
+  // Eligibility is unknown here, so the status page never offers the action.
+  assert.doesNotMatch(idle.body, START_FORM);
+  assert.ok(!idle.body.includes("Start Research"));
   assert.ok(!idle.body.includes(REFRESH));
+});
+
+test("Intake UI: the status page hides a stale last_error while research runs or after it completes", async (t) => {
+  const stale = "Earlier attempt: provider timed out.";
+  for (const status of ["researching", "brief_ready", "research_review", "completed"] as const) {
+    const fake = fakeResearch(summary(status, { last_error: stale }));
+    const harness = await startHarness(t, { research: fake.research });
+    const reply = await researchStatus(harness);
+    assert.equal(reply.status, 200, status);
+    assert.ok(!reply.body.includes(stale), status);
+  }
+  for (const status of ["failed", "needs_reconciliation"] as const) {
+    const fake = fakeResearch(summary(status, { last_error: stale }));
+    const harness = await startHarness(t, { research: fake.research });
+    assert.ok((await researchStatus(harness)).body.includes(stale), status);
+  }
 });
 
 test("Intake UI: a start that stops before recording a request is reported without internal details", async (t) => {
@@ -960,8 +977,8 @@ test("Intake UI: a start that stops before recording a request is reported witho
     { event: "research_stopped", prospectId: PROSPECT_ID, error: "Error" },
   ]);
 
-  // Nothing durable exists, so the operator may explicitly try again.
-  assert.match(reply.body, START_FORM);
+  // The status page offers no button, but the start route still rechecks durable state on an explicit POST.
+  assert.doesNotMatch(reply.body, START_FORM);
   assert.equal((await startResearch(harness)).status, 303);
   assert.deepEqual(fake.started, [PROSPECT_ID, PROSPECT_ID]);
 });

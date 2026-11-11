@@ -210,7 +210,10 @@ const RESEARCH_STATES: Record<ResearchRequest['status'], ResearchState> = {
   needs_reconciliation: needsReview('A provider outcome is uncertain. Have Google Drive inspected before any recovery; do not start research again.'),
 };
 
-// Shows durable state only. The start form appears solely when no research request exists.
+// Statuses whose recorded last_error describes the current outcome; elsewhere it is retained history.
+const ERROR_SHOWN_STATUSES: ReadonlySet<ResearchRequest['status']> = new Set(['failed', 'needs_reconciliation']);
+
+// Shows durable state only. It never offers Start Research: eligibility is not known here.
 export function renderResearchStatus(view: { prospectId: string; request: ResearchSummary | null;
   local: LocalResearchRun }): string {
   const { prospectId, request, local } = view;
@@ -227,7 +230,8 @@ export function renderResearchStatus(view: { prospectId: string; request: Resear
   const elsewhere = running && !refresh
     ? `<p>This intake UI process is not running this research. It may be running elsewhere or may have been interrupted. Reload to check again; if the status stops changing, inspect it with <code>npm run research -- status --prospect ${escapeHtml(prospectId)}</code>.</p>`
     : '';
-  const lastError = request?.last_error ? `<p>${escapeHtml(request.last_error)}</p>` : '';
+  const lastError = request?.last_error && ERROR_SHOWN_STATUSES.has(request.status)
+    ? `<p>${escapeHtml(request.last_error)}</p>` : '';
   const brief = request?.brief_url && /^https:\/\/(?:drive|docs)\.google\.com\//.test(request.brief_url)
     ? `<div><dt>Research brief</dt><dd><a href="${escapeHtml(request.brief_url)}" rel="noreferrer">Open in Google Drive</a></dd></div>`
     : '';
@@ -244,7 +248,6 @@ ${refresh ? '<p>This page refreshes every few seconds.</p>' : ''}
 <div><dt>Prospect ID</dt><dd><code>${escapeHtml(prospectId)}</code></dd></div>
 ${details}
 </dl></div>
-${request || local === 'running' ? '' : researchStartForm(prospectId)}
 ${running && !refresh ? `<p class="meta"><a href="${escapeHtml(researchStatusPath(prospectId))}">Reload status</a></p>` : ''}
 ${startOver}`, refresh ? '\n<meta http-equiv="refresh" content="5">' : '');
 }
