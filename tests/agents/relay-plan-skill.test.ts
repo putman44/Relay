@@ -154,11 +154,11 @@ test('relay-plan is read-only and leaves implementation and review as separate r
   assert.match(skill, /workers, schedulers, operator mutations/i);
   assert.match(skill, /invoke `relay-implement` or `relay-review`/i);
 
-  assert.match(agents, /Route read-only issue-driven planning work to `relay-plan`/);
-  assert.match(agents, /Route implementation work to `relay-implement`/);
-  assert.match(agents, /Route independent review work to `relay-review`/);
+  assert.match(agents, /`relay-plan`, `relay-implement`, and `relay-review` skills remain available for explicit use/);
+  assert.match(agents, /External engineering tools may work on Relay when the user requests them/);
+  assert.match(agents, /An implementing agent does not review its own work/);
   assert.match(issueTracker, /may invoke `relay-plan`/);
-  assert.match(issueTracker, /issue remains the authoritative scope/i);
-  assert.match(issueTracker, /invokes `relay-implement`/);
-  assert.match(issueTracker, /invokes `relay-review` independently/i);
+  assert.match(issueTracker, /approved scope remains authoritative/i);
+  assert.match(issueTracker, /`relay-implement` for implementation/);
+  assert.match(issueTracker, /`relay-review` for independent review/);
 });

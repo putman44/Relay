@@ -1,6 +1,0 @@
-interface:
-  display_name: "Relay Orchestrate"
-  short_description: "Orchestrate one approved Relay issue to a verified PR."
-
-policy:
-  allow_implicit_invocation: false
