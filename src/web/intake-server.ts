@@ -23,7 +23,16 @@ import {
   renderIntakeOutcomeUnknown,
   renderIntakeReview,
   renderIntakeSuccess,
+  renderResearchStatus,
+  RESEARCH_CONFIRM_VALUE,
+  RESEARCH_PROSPECT_FIELD,
+  RESEARCH_START_PATH,
+  RESEARCH_STATUS_PATH,
+  researchStatusPath,
   type IntakeFormValues,
+  type LocalResearchRun,
+  type ResearchOffer,
+  type ResearchSummary,
 } from "./intake-pages.js";
 
 // v1 is a loopback-only operator tool; the bind address is deliberately not configurable.
@@ -39,17 +48,32 @@ export type IntakeServerEvent =
     }
   | { event: "intake_conflict"; requestId: string }
   | { event: "intake_outcome_unknown"; requestId: string; error: string }
+  | { event: "research_requested"; prospectId: string }
+  | { event: "research_finished"; prospectId: string; status: string }
+  | { event: "research_stopped"; prospectId: string; error: string }
   | { event: "request_failed"; error: string };
+
+export type IntakeResearchDependencies = {
+  // Settles when the whole research workflow ends; the server never awaits it inside a request.
+  start: (prospectId: string) => Promise<ResearchSummary>;
+  getRequest: (prospectId: string) => Promise<ResearchSummary | null>;
+};
 
 export type IntakeServerDependencies = {
   createProspect: (input: ProspectIntakeInput) => Promise<ProspectIntakeResult>;
+  // Without this the UI offers no research action and serves no research routes.
+  research?: IntakeResearchDependencies;
   generateRequestId?: () => string;
   log?: (event: IntakeServerEvent) => void;
 };
 
 type Route = {
   method: "GET" | "POST";
-  handle: (req: IncomingMessage, res: ServerResponse, host: string) => Promise<void> | void;
+  handle: (
+    req: IncomingMessage,
+    res: ServerResponse,
+    host: string,
+  ) => Promise<void> | void;
 };
 type SubmittedForm = { values: IntakeFormValues; confirmed: boolean };
 
@@ -61,7 +85,15 @@ const PAGE_HEADERS: OutgoingHttpHeaders = {
   "x-frame-options": "DENY",
 };
 const PROSPECT_FORM_FIELDS = new Set<string>(INTAKE_FIELDS);
-const CONFIRMED_FORM_FIELDS = new Set<string>([...INTAKE_FIELDS, INTAKE_CONFIRM_FIELD]);
+const CONFIRMED_FORM_FIELDS = new Set<string>([
+  ...INTAKE_FIELDS,
+  INTAKE_CONFIRM_FIELD,
+]);
+const RESEARCH_FORM_FIELDS = new Set<string>([
+  RESEARCH_PROSPECT_FIELD,
+  INTAKE_CONFIRM_FIELD,
+]);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export function parseIntakeUiPort(value: string | undefined): number {
   if (value === undefined) return DEFAULT_INTAKE_UI_PORT;
@@ -123,7 +155,10 @@ function isSameOriginPost(req: IncomingMessage, host: string): boolean {
 }
 
 function isFormSubmission(req: IncomingMessage): boolean {
-  const type = req.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
+  const type = req.headers["content-type"]
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
   return type === "application/x-www-form-urlencoded";
 }
 
@@ -149,12 +184,17 @@ function readBody(req: IncomingMessage): Promise<Buffer | "too_large"> {
     });
     req.on("end", () => settle(() => resolve(Buffer.concat(chunks, size))));
     req.on("error", (error) => settle(() => reject(error)));
-    req.on("close", () => settle(() => reject(new Error("Request body was not completed."))));
+    req.on("close", () =>
+      settle(() => reject(new Error("Request body was not completed."))),
+    );
   });
 }
 
 // Strict form contract: unknown, duplicated, or non-UTF-8 fields are malformed.
-function parseForm(body: Buffer, allowed: ReadonlySet<string>): Map<string, string> | null {
+function parseForm(
+  body: Buffer,
+  allowed: ReadonlySet<string>,
+): Map<string, string> | null {
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(body);
@@ -169,49 +209,94 @@ function parseForm(body: Buffer, allowed: ReadonlySet<string>): Map<string, stri
   return fields;
 }
 
+async function readFields(
+  req: IncomingMessage,
+  res: ServerResponse,
+  host: string,
+  allowed: ReadonlySet<string>,
+): Promise<Map<string, string> | null> {
+  if (!isSameOriginPost(req, host)) {
+    sendError(
+      res,
+      403,
+      "Request rejected",
+      "Relay accepts this form only from its own pages at a loopback address. Nothing was created.",
+    );
+    return null;
+  }
+  if (!isFormSubmission(req)) {
+    sendError(
+      res,
+      415,
+      "Unsupported submission",
+      "Relay accepts only standard HTML form submissions here. Nothing was created.",
+    );
+    return null;
+  }
+  const body = await readBody(req);
+  if (body === "too_large") {
+    sendError(
+      res,
+      413,
+      "Submission too large",
+      "The form submission exceeded the size limit. Nothing was created.",
+      { connection: "close" },
+    );
+    return null;
+  }
+  const fields = parseForm(body, allowed);
+  if (!fields) {
+    sendError(
+      res,
+      400,
+      "Submission not accepted",
+      "Relay could not read this form submission. Nothing was created.",
+    );
+    return null;
+  }
+  return fields;
+}
+
 async function readForm(
   req: IncomingMessage,
   res: ServerResponse,
   host: string,
   allowed: ReadonlySet<string>,
 ): Promise<SubmittedForm | null> {
-  if (!isSameOriginPost(req, host)) {
-    sendError(res, 403, "Request rejected",
-      "Relay accepts this form only from its own pages at a loopback address. Nothing was created.");
-    return null;
-  }
-  if (!isFormSubmission(req)) {
-    sendError(res, 415, "Unsupported submission",
-      "Relay accepts only standard HTML form submissions here. Nothing was created.");
-    return null;
-  }
-  const body = await readBody(req);
-  if (body === "too_large") {
-    sendError(res, 413, "Submission too large",
-      "The form submission exceeded the size limit. Nothing was created.", { connection: "close" });
-    return null;
-  }
-  const fields = parseForm(body, allowed);
-  if (!fields) {
-    sendError(res, 400, "Submission not accepted",
-      "Relay could not read this form submission. Nothing was created.");
-    return null;
-  }
+  const fields = await readFields(req, res, host, allowed);
+  if (!fields) return null;
   const values: IntakeFormValues = {};
   for (const name of INTAKE_FIELDS) {
     const value = fields.get(name);
     if (value !== undefined) values[name] = value;
   }
-  return { values, confirmed: fields.get(INTAKE_CONFIRM_FIELD) === INTAKE_CONFIRM_VALUE };
+  return {
+    values,
+    confirmed: fields.get(INTAKE_CONFIRM_FIELD) === INTAKE_CONFIRM_VALUE,
+  };
 }
 
 // Prospect intake performs all validation; a rejection re-renders the form with the same request ID.
-function parseOrRenderInvalid(values: IntakeFormValues, res: ServerResponse): ProspectIntakeInput | null {
+function parseOrRenderInvalid(
+  values: IntakeFormValues,
+  res: ServerResponse,
+): ProspectIntakeInput | null {
   try {
     return parseProspectIntakePayload(values);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Prospect intake input is invalid.";
-    sendPage(res, 422, renderIntakeForm({ requestId: values.requestId ?? "", values, error: message }));
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Prospect intake input is invalid.";
+    sendPage(
+      res,
+      422,
+      renderIntakeForm({
+        requestId: values.requestId ?? "",
+        values,
+        error: message,
+      }),
+    );
     return null;
   }
 }
@@ -226,18 +311,29 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
     }
   };
 
-  async function createProspect(input: ProspectIntakeInput, res: ServerResponse): Promise<void> {
+  async function createProspect(
+    input: ProspectIntakeInput,
+    res: ServerResponse,
+  ): Promise<void> {
     let result: ProspectIntakeResult;
     try {
       result = await dependencies.createProspect(input);
     } catch (error) {
       if (error instanceof ProspectIntakeConflictError) {
         log({ event: "intake_conflict", requestId: input.requestId });
-        sendPage(res, 409, renderIntakeConflict(input.requestId, error.message));
+        sendPage(
+          res,
+          409,
+          renderIntakeConflict(input.requestId, error.message),
+        );
         return;
       }
       // Anything else may have committed: keep the request ID and direct an unchanged retry.
-      log({ event: "intake_outcome_unknown", requestId: input.requestId, error: errorKind(error) });
+      log({
+        event: "intake_outcome_unknown",
+        requestId: input.requestId,
+        error: errorKind(error),
+      });
       sendPage(res, 500, renderIntakeOutcomeUnknown(input.requestId));
       return;
     }
@@ -246,62 +342,247 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
       requestId: result.requestId,
       prospectId: result.prospectId,
     });
-    sendPage(res, result.created ? 201 : 200, renderIntakeSuccess(result, input.requestId));
+    // Only a prospect still awaiting research is offered the action; the start recheck is durable.
+    const offer: ResearchOffer = !dependencies.research
+      ? "none"
+      : result.stage !== "researching"
+        ? "status"
+        : input.website === null
+          ? "no-website"
+          : "start";
+    sendPage(
+      res,
+      result.created ? 201 : 200,
+      renderIntakeSuccess(result, input.requestId, offer),
+    );
+  }
+
+  function researchRoutes(
+    research: IntakeResearchDependencies,
+  ): [string, Route][] {
+    // Research this process is running, or whose last start here stopped. Postgres stays authoritative:
+    // the workflow's row lock and unique request reject any duplicate this map cannot see.
+    const runs = new Map<string, Exclude<LocalResearchRun, "idle">>();
+
+    // Not awaited: the response returns at once and the status page reads the durable request.
+    function launch(prospectId: string): void {
+      log({ event: "research_requested", prospectId });
+      Promise.resolve()
+        .then(() => research.start(prospectId))
+        .then(
+          (request) => {
+            runs.delete(prospectId);
+            log({
+              event: "research_finished",
+              prospectId,
+              status: request.status,
+            });
+          },
+          (error: unknown) => {
+            runs.set(prospectId, "stopped");
+            log({
+              event: "research_stopped",
+              prospectId,
+              error: errorKind(error),
+            });
+          },
+        );
+    }
+
+    async function startResearch(
+      prospectId: string,
+      res: ServerResponse,
+    ): Promise<void> {
+      if (runs.get(prospectId) !== "running") {
+        // Claim before the first await so a repeated submission cannot launch twice.
+        runs.set(prospectId, "running");
+        let existing: ResearchSummary | null;
+        try {
+          existing = await research.getRequest(prospectId);
+        } catch (error) {
+          runs.delete(prospectId);
+          log({ event: "request_failed", error: errorKind(error) });
+          sendError(
+            res,
+            500,
+            "Research not started",
+            "Relay could not check this prospect's research state, so research was not started.",
+          );
+          return;
+        }
+        if (existing) runs.delete(prospectId);
+        else launch(prospectId);
+      }
+      res.writeHead(303, {
+        ...PAGE_HEADERS,
+        "content-length": 0,
+        location: researchStatusPath(prospectId),
+      });
+      res.end();
+    }
+
+    return [
+      [
+        RESEARCH_START_PATH,
+        {
+          method: "POST",
+          handle: async (req, res, host) => {
+            const fields = await readFields(
+              req,
+              res,
+              host,
+              RESEARCH_FORM_FIELDS,
+            );
+            if (!fields) return;
+            if (fields.get(INTAKE_CONFIRM_FIELD) !== RESEARCH_CONFIRM_VALUE) {
+              sendError(
+                res,
+                400,
+                "Confirmation required",
+                "Research starts only from the Start Research button. Research was not started.",
+              );
+              return;
+            }
+            const prospectId =
+              fields.get(RESEARCH_PROSPECT_FIELD)?.toLowerCase() ?? "";
+            if (!UUID.test(prospectId)) {
+              sendError(
+                res,
+                400,
+                "Research not started",
+                "This submission does not identify a prospect. Research was not started.",
+              );
+              return;
+            }
+            await startResearch(prospectId, res);
+          },
+        },
+      ],
+      [
+        RESEARCH_STATUS_PATH,
+        {
+          method: "GET",
+          handle: async (req, res) => {
+            const query = new URLSearchParams(
+              (req.url ?? "").split("?", 2)[1] ?? "",
+            );
+            const prospectId =
+              query.get(RESEARCH_PROSPECT_FIELD)?.toLowerCase() ?? "";
+            if (!UUID.test(prospectId)) {
+              sendError(
+                res,
+                400,
+                "Research status unavailable",
+                "This link does not identify a prospect.",
+              );
+              return;
+            }
+            // Read the local run first: the durable read that follows can only be newer.
+            const local = runs.get(prospectId) ?? "idle";
+            const request = await research.getRequest(prospectId);
+            sendPage(
+              res,
+              200,
+              renderResearchStatus({ prospectId, request, local }),
+            );
+          },
+        },
+      ],
+    ];
   }
 
   const routes = new Map<string, Route>([
-    ["/", {
-      method: "GET",
-      handle: (_req, res) => sendPage(res, 200, renderIntakeForm({ requestId: generateRequestId() })),
-    }],
-    ["/healthz", {
-      method: "GET",
-      handle: (_req, res) => {
-        res.writeHead(200, {
-          "cache-control": "no-store",
-          "content-type": "text/plain; charset=utf-8",
-          "x-content-type-options": "nosniff",
-        });
-        res.end("ok\n");
+    [
+      "/",
+      {
+        method: "GET",
+        handle: (_req, res) =>
+          sendPage(
+            res,
+            200,
+            renderIntakeForm({ requestId: generateRequestId() }),
+          ),
       },
-    }],
-    ["/review", {
-      method: "POST",
-      handle: async (req, res, host) => {
-        const form = await readForm(req, res, host, PROSPECT_FORM_FIELDS);
-        const input = form && parseOrRenderInvalid(form.values, res);
-        if (input) sendPage(res, 200, renderIntakeReview(input));
+    ],
+    [
+      "/healthz",
+      {
+        method: "GET",
+        handle: (_req, res) => {
+          res.writeHead(200, {
+            "cache-control": "no-store",
+            "content-type": "text/plain; charset=utf-8",
+            "x-content-type-options": "nosniff",
+          });
+          res.end("ok\n");
+        },
       },
-    }],
-    ["/edit", {
-      method: "POST",
-      handle: async (req, res, host) => {
-        const form = await readForm(req, res, host, PROSPECT_FORM_FIELDS);
-        if (!form) return;
-        sendPage(res, 200, renderIntakeForm({ requestId: form.values.requestId ?? "", values: form.values }));
+    ],
+    [
+      "/review",
+      {
+        method: "POST",
+        handle: async (req, res, host) => {
+          const form = await readForm(req, res, host, PROSPECT_FORM_FIELDS);
+          const input = form && parseOrRenderInvalid(form.values, res);
+          if (input) sendPage(res, 200, renderIntakeReview(input));
+        },
       },
-    }],
-    ["/prospects", {
-      method: "POST",
-      handle: async (req, res, host) => {
-        const form = await readForm(req, res, host, CONFIRMED_FORM_FIELDS);
-        if (!form) return;
-        if (!form.confirmed) {
-          sendError(res, 400, "Confirmation required",
-            "Prospects are created only from the review page after you confirm. Nothing was created.");
-          return;
-        }
-        const input = parseOrRenderInvalid(form.values, res);
-        if (input) await createProspect(input, res);
+    ],
+    [
+      "/edit",
+      {
+        method: "POST",
+        handle: async (req, res, host) => {
+          const form = await readForm(req, res, host, PROSPECT_FORM_FIELDS);
+          if (!form) return;
+          sendPage(
+            res,
+            200,
+            renderIntakeForm({
+              requestId: form.values.requestId ?? "",
+              values: form.values,
+            }),
+          );
+        },
       },
-    }],
+    ],
+    [
+      "/prospects",
+      {
+        method: "POST",
+        handle: async (req, res, host) => {
+          const form = await readForm(req, res, host, CONFIRMED_FORM_FIELDS);
+          if (!form) return;
+          if (!form.confirmed) {
+            sendError(
+              res,
+              400,
+              "Confirmation required",
+              "Prospects are created only from the review page after you confirm. Nothing was created.",
+            );
+            return;
+          }
+          const input = parseOrRenderInvalid(form.values, res);
+          if (input) await createProspect(input, res);
+        },
+      },
+    ],
+    ...(dependencies.research ? researchRoutes(dependencies.research) : []),
   ]);
 
-  async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async function handle(
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
     const host = req.headers.host?.toLowerCase();
     if (!host || !allowedHosts(server).has(host)) {
-      sendError(res, 403, "Request rejected",
-        "Relay accepts requests only at its loopback address. Nothing was created.");
+      sendError(
+        res,
+        403,
+        "Request rejected",
+        "Relay accepts requests only at its loopback address. Nothing was created.",
+      );
       return;
     }
     // Exact origin-form paths only; absolute-form targets are not routed.
@@ -311,8 +592,13 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
       return;
     }
     if (req.method !== route.method) {
-      sendError(res, 405, "Method not allowed",
-        "This page does not accept that request method. Nothing was created.", { allow: route.method });
+      sendError(
+        res,
+        405,
+        "Method not allowed",
+        "This page does not accept that request method. Nothing was created.",
+        { allow: route.method },
+      );
       return;
     }
     await route.handle(req, res, host);
@@ -325,7 +611,12 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
         res.destroy();
         return;
       }
-      sendError(res, 500, "Something went wrong", "Relay could not complete this request.");
+      sendError(
+        res,
+        500,
+        "Something went wrong",
+        "Relay could not complete this request.",
+      );
     });
   });
   server.headersTimeout = 10_000;

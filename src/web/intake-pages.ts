@@ -1,9 +1,22 @@
 import { createHash } from 'node:crypto';
 import type { ProspectIntakeInput, ProspectIntakeResult } from '../intake/prospect-intake.js';
+import type { ResearchRequest } from '../research/prospect-research.js';
 
 export type IntakeField = keyof ProspectIntakeInput;
 export type IntakeFormValues = Partial<Record<IntakeField, string>>;
 type ProspectField = Exclude<IntakeField, 'requestId'>;
+
+// The durable research fields the pages show: identifiers and state, never research content.
+export type ResearchSummary = Pick<ResearchRequest, 'id' | 'status' | 'updated_at' | 'last_error' | 'brief_url'>;
+// What this server process knows beyond the durable request: it is running the workflow, or its last start stopped.
+export type LocalResearchRun = 'running' | 'stopped' | 'idle';
+export type ResearchOffer = 'start' | 'status' | 'no-website' | 'none';
+export const RESEARCH_START_PATH = '/research/start';
+export const RESEARCH_STATUS_PATH = '/research';
+export const RESEARCH_PROSPECT_FIELD = 'prospectId';
+export const RESEARCH_CONFIRM_VALUE = 'start-research-only';
+export const researchStatusPath = (prospectId: string) =>
+  `${RESEARCH_STATUS_PATH}?${RESEARCH_PROSPECT_FIELD}=${encodeURIComponent(prospectId)}`;
 
 // Labels only: prospect intake owns every validation rule, so the form adds no client-side constraints.
 const FIELDS: Record<ProspectField, { label: string; required?: true; multiline?: true; inputMode?: 'url' | 'email' }> = {
@@ -70,12 +83,12 @@ export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, character => ENTITIES[character]!);
 }
 
-function page(title: string, content: string): string {
+function page(title: string, content: string, head = ''): string {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">${head}
 <title>${escapeHtml(title)} · Relay intake</title>
 <style>${STYLE}</style>
 </head>
@@ -145,13 +158,27 @@ ${INTAKE_FIELDS.map(name => hiddenField(name, input[name] ?? '')).join('\n')}
 ${requestIdMeta(input.requestId)}`);
 }
 
-export function renderIntakeSuccess(result: ProspectIntakeResult, submittedRequestId: string): string {
+// Research starts only from this explicit submission; no page starts it on load.
+const researchStartForm = (prospectId: string) =>
+  `<form class="panel" method="post" action="${RESEARCH_START_PATH}" accept-charset="UTF-8">
+<p>Research does not start on its own. Starting it reads the prospect's public website through Firecrawl and OpenAI and saves a brief to Google Drive. It does not create or send email.</p>
+${hiddenField(RESEARCH_PROSPECT_FIELD, prospectId)}
+<div class="actions"><button type="submit" name="${INTAKE_CONFIRM_FIELD}" value="${RESEARCH_CONFIRM_VALUE}">Start Research</button></div>
+</form>`;
+
+export function renderIntakeSuccess(result: ProspectIntakeResult, submittedRequestId: string,
+  research: ResearchOffer = 'none'): string {
   const heading = result.created ? 'Prospect created' : 'Prospect already recorded';
   const summary = result.created
     ? 'Relay created the prospect and recorded this intake request.'
     : 'This intake matches one Relay already recorded. No new prospect was created.';
   const replaced = result.requestId === submittedRequestId ? ''
     : `<p>Request ID <code>${escapeHtml(submittedRequestId)}</code> was not used. The intake is recorded under the request ID below.</p>`;
+  const researchSection = research === 'start' ? researchStartForm(result.prospectId)
+    : research === 'status'
+      ? `<p class="meta"><a href="${escapeHtml(researchStatusPath(result.prospectId))}">View research status</a></p>`
+      : research === 'no-website' ? '<p class="meta">Research needs a website, so it is not offered for this prospect.</p>'
+        : '';
   return page(heading, `<h1>${heading}</h1>
 <div class="notice success" role="status"><p>${summary}</p>${replaced}</div>
 <div class="panel"><dl>
@@ -159,7 +186,67 @@ export function renderIntakeSuccess(result: ProspectIntakeResult, submittedReque
 <div><dt>Stage</dt><dd>${escapeHtml(result.stage)}</dd></div>
 <div><dt>Intake request ID</dt><dd><code>${escapeHtml(result.requestId)}</code></dd></div>
 </dl></div>
+${researchSection}
 <p class="meta"><a href="/">Start another intake</a></p>`);
+}
+
+type ResearchState = { heading: string; tone: 'success' | 'warning' | 'error'; message: string };
+const RESEARCH_RUNNING: ResearchState = { heading: 'Research is running', tone: 'warning',
+  message: 'Relay is researching this prospect. This can take a few minutes.' };
+const completed = (message: string): ResearchState => ({ heading: 'Research completed', tone: 'success', message });
+const needsReview = (message: string): ResearchState => ({ heading: 'Research needs review', tone: 'error', message });
+const RESEARCH_STATES: Record<ResearchRequest['status'], ResearchState> = {
+  researching: RESEARCH_RUNNING,
+  research_ready: RESEARCH_RUNNING,
+  folder_creating: RESEARCH_RUNNING,
+  folder_ready: RESEARCH_RUNNING,
+  brief_creating: RESEARCH_RUNNING,
+  brief_ready: RESEARCH_RUNNING,
+  draft_creating: RESEARCH_RUNNING,
+  research_review: completed('Research finished and the brief is ready for your review. No Gmail draft was created.'),
+  needs_contact: completed('Research finished but found no public contact email. No Gmail draft was created.'),
+  completed: completed('Research finished and a Gmail draft is waiting for review.'),
+  failed: needsReview('Research stopped. Have the request inspected before any retry.'),
+  needs_reconciliation: needsReview('A provider outcome is uncertain. Have Google Drive inspected before any recovery; do not start research again.'),
+};
+
+// Shows durable state only. The start form appears solely when no research request exists.
+export function renderResearchStatus(view: { prospectId: string; request: ResearchSummary | null;
+  local: LocalResearchRun }): string {
+  const { prospectId, request, local } = view;
+  const state: ResearchState = request ? RESEARCH_STATES[request.status]
+    : local === 'running' ? { ...RESEARCH_RUNNING, message: 'Relay is starting research for this prospect.' }
+      : local === 'stopped' ? { heading: 'Research did not start', tone: 'error',
+        message: 'Relay could not begin research and recorded no research request. The prospect may not be eligible '
+          + '(research needs a website and a prospect with no earlier research or outreach), or the research '
+          + 'configuration may be incomplete. The intake UI log records the attempt.' }
+        : { heading: 'Research not started', tone: 'warning', message: 'No research has been started for this prospect.' };
+  const running = state === RESEARCH_RUNNING || (!request && local === 'running');
+  // Pages carry no scripts, so a running page reloads itself only while this process is doing the work.
+  const refresh = running && local === 'running';
+  const elsewhere = running && !refresh
+    ? `<p>This intake UI process is not running this research. It may be running elsewhere or may have been interrupted. Reload to check again; if the status stops changing, inspect it with <code>npm run research -- status --prospect ${escapeHtml(prospectId)}</code>.</p>`
+    : '';
+  const lastError = request?.last_error ? `<p>${escapeHtml(request.last_error)}</p>` : '';
+  const brief = request?.brief_url && /^https:\/\/(?:drive|docs)\.google\.com\//.test(request.brief_url)
+    ? `<div><dt>Research brief</dt><dd><a href="${escapeHtml(request.brief_url)}" rel="noreferrer">Open in Google Drive</a></dd></div>`
+    : '';
+  const details = request ? `<div><dt>Research status</dt><dd><code>${escapeHtml(request.status)}</code></dd></div>
+<div><dt>Research request ID</dt><dd><code>${escapeHtml(request.id)}</code></dd></div>
+<div><dt>Last updated</dt><dd>${escapeHtml(new Date(request.updated_at).toISOString())}</dd></div>
+${brief}` : '';
+  return page(state.heading, `<h1>${state.heading}</h1>
+<div class="notice ${state.tone}" role="status">
+<p>${state.message}</p>${lastError}${elsewhere}
+${refresh ? '<p>This page refreshes every few seconds.</p>' : ''}
+</div>
+<div class="panel"><dl>
+<div><dt>Prospect ID</dt><dd><code>${escapeHtml(prospectId)}</code></dd></div>
+${details}
+</dl></div>
+${request || local === 'running' ? '' : researchStartForm(prospectId)}
+${running && !refresh ? `<p class="meta"><a href="${escapeHtml(researchStatusPath(prospectId))}">Reload status</a></p>` : ''}
+${startOver}`, refresh ? '\n<meta http-equiv="refresh" content="5">' : '');
 }
 
 // Intake conflicts roll back before any write, so this outcome is definite.

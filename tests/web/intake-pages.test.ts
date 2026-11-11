@@ -7,6 +7,8 @@ import {
   renderErrorPage,
   renderIntakeForm,
   renderIntakeOutcomeUnknown,
+  renderIntakeSuccess,
+  renderResearchStatus,
 } from "../../src/web/intake-pages.js";
 
 test("Intake pages: escapeHtml neutralizes markup and attribute delimiters", () => {
@@ -23,6 +25,13 @@ test("Intake pages: the CSP allows exactly the inline stylesheet and no scripts"
     renderIntakeForm({ requestId: "id" }),
     renderErrorPage("Title", "Message"),
     renderIntakeOutcomeUnknown("id"),
+    renderIntakeSuccess(
+      { requestId: "id", prospectId: "prospect", stage: "researching", created: true },
+      "id",
+      "start",
+    ),
+    renderResearchStatus({ prospectId: "prospect", request: null, local: "running" }),
+    renderResearchStatus({ prospectId: "prospect", request: null, local: "stopped" }),
   ]) {
     const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1];
     assert.ok(style !== undefined);
