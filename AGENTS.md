@@ -1,6 +1,6 @@
 # Relay engineering handbook
 
-This is the authoritative repository-wide engineering handbook for every coding agent working in Relay, including Codex and Claude Code. Tool-specific files such as `CLAUDE.md` defer to it and add only tool compatibility notes.
+This is the authoritative repository-wide engineering handbook for every coding agent working in Relay, including external engineering tools, Codex, and Claude Code. Tool-specific files such as `CLAUDE.md` defer to it and add only tool compatibility notes.
 
 Relay replaces Relay-specific n8n workflows with a TypeScript service. Postgres is the authoritative durable state. Gmail, Google Drive, Firecrawl, and OpenAI are external providers whose side effects can be real and irreversible.
 
@@ -73,16 +73,13 @@ Treat every pre-existing uncommitted change, whether staged, unstaged, or untrac
 - Domain and operational context: `docs/agents/domain.md`.
 - Issue workflow: `docs/agents/issue-tracker.md`.
 
-## Relay skills
+## Engineering tools and Relay skills
 
 Canonical skill definitions live in `.agents/skills/`. `.claude/skills/` holds relative symlinks to them for Claude Code; do not copy or duplicate `SKILL.md` files.
 
-- Route read-only issue-driven planning work to `relay-plan`.
-- Route implementation work to `relay-implement`.
-- Route independent review work to `relay-review`. An implementing agent does not review its own work.
-- Route end-to-end coordination of one explicitly identified issue to `relay-orchestrate`. The orchestrator dispatches the other three roles, owns authorized branch/commit/push/PR mutations, validates exact-head CI, and stops for Taylor's final merge decision.
+External engineering tools may work on Relay when the user requests them. They must follow this handbook, including its task-specific authorization, worktree ownership, database, provider, and GitHub boundaries. A tool's own workflow, policy file, or approval mechanism does not grant authority to bypass these rules. Software Factory is maintained in its independent repository and is not a Relay runtime dependency.
 
-The role boundaries are fixed: `relay-plan` produces a readiness decision and advisory guidance; `relay-implement` changes the worktree; `relay-review` independently evaluates a committed fixed point; `relay-orchestrate` coordinates the handoffs and authorized engineering-workflow mutations. No role silently absorbs another role's authority.
+The repository-local `relay-plan`, `relay-implement`, and `relay-review` skills remain available for explicit use. Their role boundaries are fixed: planning is read-only, implementation changes the worktree, and review independently evaluates a fixed point. An implementing agent does not review its own work. These skills do not prevent an authorized external tool from performing the corresponding work under this handbook.
 
 ### `relay-implement` limits
 
@@ -92,12 +89,8 @@ The role boundaries are fixed: `relay-plan` produces a readiness decision and ad
 - Apply migrations to development, shared, or production environments.
 - Enable, set, unset, or change `RELAY_ENABLE_LIVE_OUTREACH_SEND` in any shell, `.env`, process environment, or deployment configuration.
 - Perform live operational mutations, such as creating or sending Gmail drafts or messages, writing to Google Drive, running a worker or scheduler, or running an operator mutation.
-- Commit, push, create or merge pull requests, or mutate GitHub state. These remain human or orchestrator responsibilities.
+- Commit, push, create or merge pull requests, or mutate GitHub state. These require a separate authorized workflow or human action.
 
 Database-writing tests under `relay-implement` still require explicit approval and may run only against the guarded local disposable `relay_test` environment. The sole exception is `npm run verify`, which owns and destroys its isolated Docker database and may be run without separate database-write approval.
 
-### `relay-orchestrate` limits
-
-`relay-orchestrate` may create its deterministic issue branch, fixed implementation commit, push, and pull request only as part of its explicitly invoked workflow and only after its documented gates pass. It may not implement or review in place of the dispatched roles. It never merges, enables auto-merge, deploys, selects issues autonomously, runs remediation loops, weakens exact-head evidence, or performs live/production product operations.
-
-Relay skills are explicit workflows. Run one only when the user invokes it; never select one implicitly. Codex enforces this with `policy.allow_implicit_invocation: false` in each skill's `agents/openai.yaml`, and Claude Code with `disable-model-invocation: true` in each `SKILL.md` frontmatter. If a request fits a Relay skill that the user did not invoke, name the skill so the user can invoke it.
+Relay skills are explicit workflows. Run one only when the user invokes it; never select one implicitly. Codex enforces this with `policy.allow_implicit_invocation: false` in each skill's `agents/openai.yaml`, and Claude Code with `disable-model-invocation: true` in each `SKILL.md` frontmatter. A request for engineering work does not implicitly invoke a Relay skill.

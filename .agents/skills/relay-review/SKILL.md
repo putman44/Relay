@@ -311,27 +311,3 @@ Report:
    - **Further design review**: intent, recovery semantics, or a safety boundary remains unresolved, or safety-critical verification is incomplete.
 
 If there are no findings, say so directly but still report residual verification limits. Do not claim that live or production behavior is verified unless it was directly and safely established within the user's authorization.
-
-### Machine-readable review result
-
-After the human-readable report, emit exactly one fenced `json` block with this stable machine-readable continuation result. Populate every value from the current review; the values below demonstrate the passing shape and are not defaults:
-
-```json
-{
-  "schemaVersion": 1,
-  "recommendation": "MERGE",
-  "reviewedBaseSha": "<full resolved base commit SHA>",
-  "reviewedHeadSha": "<full reviewed HEAD commit SHA>",
-  "blockingDefectCount": 0,
-  "requiredVerification": "SUCCESS"
-}
-```
-
-The block must be valid JSON with exactly these fields. Use one of these exact enums:
-
-- `recommendation`: `MERGE`, `CHANGES`, or `FURTHER_DESIGN_REVIEW`.
-- `requiredVerification`: `SUCCESS`, `INCOMPLETE`, or `FAILED`.
-
-Map the human-readable recommendations to their uppercase JSON equivalents. Count every confirmed defect that blocks merge in `blockingDefectCount`. Use `SUCCESS` only when all required review verification completed successfully; skipped or unavailable safety-critical verification is `INCOMPLETE`, and a code-caused verification failure is `FAILED`.
-
-The continuation result permits orchestration only when the recommendation is exactly `MERGE`, the blocking defect count is zero, required verification is `SUCCESS`, and the reviewed base SHA and reviewed HEAD SHA exactly match the orchestrator's recorded fixed point. Otherwise the orchestrator must STOP. The JSON is additive and never replaces the human-readable findings or the independent Spec, Relay Safety, and Standards axes.

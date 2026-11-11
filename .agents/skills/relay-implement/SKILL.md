@@ -29,7 +29,7 @@ Never do the following, even with approval. They are outside this workflow:
 - Apply migrations to development, shared, or production environments.
 - Enable, set, unset, or change `RELAY_ENABLE_LIVE_OUTREACH_SEND` in any shell, `.env`, process environment, or deployment configuration.
 - Perform live operational mutations, such as creating or sending Gmail drafts or messages, writing to Google Drive, running a worker or scheduler, or running an operator mutation.
-- Commit, push, create or merge a pull request, or mutate GitHub state, such as creating, editing, commenting on, labeling, or closing an issue or pull request. These remain human or orchestrator responsibilities.
+- Commit, push, create or merge a pull request, or mutate GitHub state, such as creating, editing, commenting on, labeling, or closing an issue or pull request. These require a separate authorized workflow or human action.
 
 Without explicit task-specific approval, never:
 
@@ -81,6 +81,6 @@ Summarize:
 - Any skipped tests.
 - Any behavior that remains unverified.
 
-Do not commit, push, create or merge a pull request, or mutate GitHub state. These remain human or orchestrator responsibilities.
+Do not commit, push, create or merge a pull request, or mutate GitHub state. These require a separate authorized workflow or human action.
 
 Do not review your own implementation or invoke a review workflow as part of this skill. Leave review to a separate reviewer agent.
