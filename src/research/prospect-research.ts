@@ -26,6 +26,7 @@ import {
   validateResearchResult,
   type ResearchResult,
 } from "./research-result.js";
+import { saveResearchPages } from "../data/save-research-pages.js";
 
 type Status =
   | "researching"
@@ -162,6 +163,7 @@ async function advance(
   from: Status,
   to: Status,
   updates: Record<string, unknown> = {},
+  beforeCommit?: (client: PoolClient) => Promise<void>,
 ): Promise<ResearchRequest> {
   return transaction(pool, async (client) => {
     await locked(client, id, owner, from);
@@ -177,8 +179,14 @@ async function advance(
       from,
       ...keys.map((key) => updates[key]),
     ]);
+
     if (result.rowCount !== 1)
       throw new Error("Research request state changed.");
+
+    if (beforeCommit) {
+      await beforeCommit(client);
+    }
+
     return result.rows[0]!;
   });
 }
@@ -533,13 +541,28 @@ async function runResearch(
         id,
         request.prospect_id,
       );
+
       request = await advance(
         deps.database,
         id,
         owner,
         "researching",
         "research_ready",
-        { evidence: JSON.stringify(evidence), result: JSON.stringify(result) },
+        {
+          evidence: JSON.stringify(evidence),
+          result: JSON.stringify(result),
+        },
+        async (client) => {
+          await saveResearchPages(
+            {
+              prospectId: request.prospect_id,
+              researchRequestId: id,
+              website: input.website,
+              evidence,
+            },
+            client,
+          );
+        },
       );
     } catch (error) {
       const reason =

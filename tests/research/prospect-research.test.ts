@@ -1,16 +1,16 @@
-import "../../scripts/check-test-database.js";
 import { strict as assert } from "node:assert";
 import { randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { test } from "node:test";
 import { Pool } from "pg";
+import "../../scripts/check-test-database.js";
+import type { DriveArtifact } from "../../src/research/drive-artifacts.js";
 import {
-  startProspectResearch,
   resumeProspectResearch,
   retryFailedPreArtifactResearch,
+  startProspectResearch,
   type ResearchDependencies,
 } from "../../src/research/prospect-research.js";
-import type { DriveArtifact } from "../../src/research/drive-artifacts.js";
 
 test("Prospect research journals external artifacts and creates only review drafts", async (t) => {
   const connectionString = process.env.RELAY_DRAFT_TEST_DATABASE_URL!;
@@ -117,17 +117,25 @@ test("Prospect research journals external artifacts and creates only review draf
     ],
     researchLimitations: [],
   });
+
   const evidence = {
     pages: [
-      { url: root, markdown: "Home service.", links: [contact] },
+      {
+        url: root,
+        markdown: "Home service.",
+        links: [contact],
+        scrapedAt: "2026-11-12T01:30:00.000Z",
+      },
       {
         url: contact,
         markdown: "Contact hello@business.testsite.org",
         links: ["mailto:hello@business.testsite.org"],
+        scrapedAt: "2026-11-12T01:30:00.000Z",
       },
     ],
     limitations: [],
   };
+
   const insertProspect = async () => {
     const id = randomUUID();
     await database.query(
@@ -233,6 +241,30 @@ test("Prospect research journals external artifacts and creates only review draf
         gmailDraftAllowed: true,
       });
       assert.equal(request.status, "completed");
+
+      const savedDocuments = await database.query<{
+        source_url: string;
+        content: string;
+        scraped_at: Date;
+      }>(
+        `SELECT source_url, content, scraped_at
+   FROM research_documents
+   WHERE research_request_id = $1`,
+        [request.id],
+      );
+
+      assert.equal(savedDocuments.rows.length, 2);
+
+      for (const page of evidence.pages) {
+        const document = savedDocuments.rows.find(
+          (row) => row.source_url === page.url,
+        );
+
+        assert.ok(document);
+        assert.equal(document.content, page.markdown);
+        assert.equal(document.scraped_at.toISOString(), page.scrapedAt);
+      }
+
       assert.equal(request.gmail_draft_allowed, true);
       const draft = (
         await database.query(

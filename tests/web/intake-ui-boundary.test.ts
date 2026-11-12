@@ -2,8 +2,8 @@ import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 // Specifier characters only, so quoted text after an ordinary "from" in code is not read as an import.
@@ -43,6 +43,8 @@ test("Intake UI process loads only intake, page, database, and research modules:
   // The Gmail entries are the OAuth client Drive shares and modules reached only through type imports.
   assert.deepEqual(modules, [
     "scripts/run-intake-ui.ts",
+    "src/data/canonical-data.ts",
+    "src/data/save-research-pages.ts",
     "src/db.ts",
     "src/gmail/gmail-auth.ts",
     "src/gmail/gmail-draft-creator.ts",

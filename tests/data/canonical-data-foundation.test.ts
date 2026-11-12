@@ -9,6 +9,7 @@ import {
   createResearchChunk,
   createResearchDocument,
 } from "../../src/data/canonical-data.js";
+import { saveResearchPages } from "../../src/data/save-research-pages.js";
 
 test("Canonical data foundation: persistence and relational constraints", async (t) => {
   const connectionString = process.env.RELAY_DRAFT_TEST_DATABASE_URL!;
@@ -98,6 +99,138 @@ test("Canonical data foundation: persistence and relational constraints", async 
       );
     },
   );
+
+  await t.test("saves three Firecrawl pages in one transaction", async () => {
+    const website = "https://canonical-data-fixture.com/";
+    const scrapedAt = "2026-11-12T01:30:00.000Z";
+
+    const pages = [
+      {
+        url: website,
+        markdown: "# Homepage\n\nOriginal homepage content.",
+        links: [],
+        scrapedAt,
+      },
+      {
+        url: `${website}relay`,
+        markdown: "# Relay\n\nOriginal Relay content.",
+        links: [],
+        scrapedAt,
+      },
+      {
+        url: `${website}portfolio`,
+        markdown: "# Portfolio\n\nOriginal portfolio content.",
+        links: [],
+        scrapedAt,
+      },
+    ];
+
+    const client = await database.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      const saved = await saveResearchPages(
+        {
+          prospectId,
+          researchRequestId,
+          website,
+          evidence: { pages, limitations: [] },
+        },
+        client,
+      );
+
+      assert.equal(saved.length, 3);
+
+      for (let i = 0; i < pages.length; i++) {
+        assert.equal(saved[i]?.source_url, pages[i]?.url);
+        assert.equal(saved[i]?.content, pages[i]?.markdown);
+        assert.equal(saved[i]?.scraped_at.toISOString(), scrapedAt);
+      }
+
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    // Confirm the documents survived after the transaction committed.
+    const result = await database.query(
+      `SELECT id
+     FROM research_documents
+     WHERE research_request_id = $1
+       AND source_url = ANY($2::text[])`,
+      [researchRequestId, pages.map((page) => page.url)],
+    );
+
+    assert.equal(result.rows.length, 3);
+  });
+
+  await t.test("rolls back documents when a later page conflicts", async () => {
+    const website = "https://canonical-data-fixture.com/";
+    const scrapedAt = "2026-11-12T01:30:00.000Z";
+    const temporaryUrl = `${website}rollback-check`;
+
+    const pages = [
+      {
+        // Already saved by our previous test, with matching content.
+        url: website,
+        markdown: "# Homepage\n\nOriginal homepage content.",
+        links: [],
+        scrapedAt,
+      },
+      {
+        // This is a new document that should be rolled back.
+        url: temporaryUrl,
+        markdown: "# Temporary\n\nShould not remain in SQL.",
+        links: [],
+        scrapedAt,
+      },
+      {
+        // This URL already exists, but the content is different.
+        url: `${website}relay`,
+        markdown: "# Relay\n\nConflicting content.",
+        links: [],
+        scrapedAt,
+      },
+    ];
+
+    const client = await database.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      await assert.rejects(
+        saveResearchPages(
+          {
+            prospectId,
+            researchRequestId,
+            website,
+            evidence: { pages, limitations: [] },
+          },
+          client,
+        ),
+        /Existing research document conflicts with saved evidence/,
+      );
+
+      await client.query("ROLLBACK");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    const result = await database.query(
+      `SELECT id FROM research_documents
+     WHERE research_request_id = $1 AND source_url = $2`,
+      [researchRequestId, temporaryUrl],
+    );
+
+    assert.equal(result.rows.length, 0);
+  });
 
   await t.test(
     "reuses identical research documents and rejects conflicting retries",
