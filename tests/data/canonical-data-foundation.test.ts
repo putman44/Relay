@@ -127,6 +127,18 @@ test("Canonical data foundation: persistence and relational constraints", async 
         /Existing research document conflicts with saved evidence/,
       );
 
+      // A changed scrape timestamp must also be rejected.
+      await assert.rejects(
+        createResearchDocument(
+          {
+            ...input,
+            scrapedAt: new Date("2026-11-02T13:00:00.000Z"),
+          },
+          database,
+        ),
+        /Existing research document conflicts with saved evidence/,
+      );
+
       // Test 3: The original document remains unchanged.
       const saved = await database.query<{
         id: string;

@@ -164,7 +164,8 @@ export async function createResearchDocument(
     document.prospect_id !== prospectId ||
     document.page_type !== input.pageType ||
     document.title !== title ||
-    document.content !== content
+    document.content !== content ||
+    document.scraped_at.getTime() !== scrapedAt.getTime()
   ) {
     throw new Error(
       "Existing research document conflicts with saved evidence.",
