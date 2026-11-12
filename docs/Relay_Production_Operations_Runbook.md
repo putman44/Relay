@@ -143,23 +143,23 @@ The command emits one JSON snapshot. It contains aggregate counts and timestamps
 
 ### Exit codes
 
-| Code | Meaning | Scheduler action |
-| ---: | --- | --- |
-| `0` | Healthy; no alert condition found | Record success |
-| `2` | Monitor ran successfully and found work requiring attention | Alert the operator and preserve the JSON output |
-| `1` | Monitor could not produce a trustworthy snapshot | Alert as a monitoring failure |
+| Code | Meaning                                                     | Scheduler action                                |
+| ---: | ----------------------------------------------------------- | ----------------------------------------------- |
+|  `0` | Healthy; no alert condition found                           | Record success                                  |
+|  `2` | Monitor ran successfully and found work requiring attention | Alert the operator and preserve the JSON output |
+|  `1` | Monitor could not produce a trustworthy snapshot            | Alert as a monitoring failure                   |
 
 Exit code `2` is an operational alert, not a monitor crash.
 
 ### Alert conditions
 
-| Alert code | Meaning | First response |
-| --- | --- | --- |
-| `failed_jobs` | One or more jobs are terminally failed | Inspect the exact job; do not automatically requeue it |
-| `stale_processing_jobs` | A processing job has exceeded the stale threshold | Determine whether a worker stopped and whether Gmail may have been invoked |
-| `overdue_ready_jobs` | A ready pending job has waited past the threshold | Check scheduler health and whether live sending was intentionally disabled |
-| `drafts_need_reconciliation` | A draft has an uncertain Gmail outcome | Verify Gmail manually before any recovery |
-| `prospects_need_reconciliation` | A prospect is blocked on send reconciliation | Resolve the matching draft/job evidence as one incident |
+| Alert code                      | Meaning                                           | First response                                                             |
+| ------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------- |
+| `failed_jobs`                   | One or more jobs are terminally failed            | Inspect the exact job; do not automatically requeue it                     |
+| `stale_processing_jobs`         | A processing job has exceeded the stale threshold | Determine whether a worker stopped and whether Gmail may have been invoked |
+| `overdue_ready_jobs`            | A ready pending job has waited past the threshold | Check scheduler health and whether live sending was intentionally disabled |
+| `drafts_need_reconciliation`    | A draft has an uncertain Gmail outcome            | Verify Gmail manually before any recovery                                  |
+| `prospects_need_reconciliation` | A prospect is blocked on send reconciliation      | Resolve the matching draft/job evidence as one incident                    |
 
 ---
 

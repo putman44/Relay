@@ -26,12 +26,25 @@ test("Intake pages: the CSP allows exactly the inline stylesheet and no scripts"
     renderErrorPage("Title", "Message"),
     renderIntakeOutcomeUnknown("id"),
     renderIntakeSuccess(
-      { requestId: "id", prospectId: "prospect", stage: "researching", created: true },
+      {
+        requestId: "id",
+        prospectId: "prospect",
+        stage: "researching",
+        created: true,
+      },
       "id",
       "start",
     ),
-    renderResearchStatus({ prospectId: "prospect", request: null, local: "running" }),
-    renderResearchStatus({ prospectId: "prospect", request: null, local: "stopped" }),
+    renderResearchStatus({
+      prospectId: "prospect",
+      request: null,
+      local: "running",
+    }),
+    renderResearchStatus({
+      prospectId: "prospect",
+      request: null,
+      local: "stopped",
+    }),
   ]) {
     const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1];
     assert.ok(style !== undefined);
@@ -46,7 +59,9 @@ test("Intake pages: textarea values survive HTML parsing unchanged", () => {
     requestId: "id",
     values: { primaryDiscoveryQuestion: "\nStarts with a newline" },
   });
-  assert.ok(html.includes('autocomplete="off">\n\nStarts with a newline</textarea>'));
+  assert.ok(
+    html.includes('autocomplete="off">\n\nStarts with a newline</textarea>'),
+  );
 });
 
 const RESEARCH_STATUSES = [
@@ -88,7 +103,12 @@ test("Intake pages: a recorded research error is shown only for failed and needs
 
 test("Intake pages: the research status page never offers Start Research, but the success page does", () => {
   const offered = renderIntakeSuccess(
-    { requestId: "id", prospectId: "prospect", stage: "researching", created: true },
+    {
+      requestId: "id",
+      prospectId: "prospect",
+      stage: "researching",
+      created: true,
+    },
     "id",
     "start",
   );

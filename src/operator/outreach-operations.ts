@@ -77,15 +77,10 @@ export const getOutreachOperationalStatus = async ({
   staleProcessingMinutes = DEFAULT_STALE_PROCESSING_MINUTES,
   readyPendingMinutes = DEFAULT_READY_PENDING_MINUTES,
 }: GetOutreachOperationalStatusOptions = {}): Promise<OutreachOperationalStatus> => {
-  requirePositiveMinutes(
-    staleProcessingMinutes,
-    "staleProcessingMinutes",
-  );
+  requirePositiveMinutes(staleProcessingMinutes, "staleProcessingMinutes");
   requirePositiveMinutes(readyPendingMinutes, "readyPendingMinutes");
 
-  const staleBefore = new Date(
-    now.getTime() - staleProcessingMinutes * 60_000,
-  );
+  const staleBefore = new Date(now.getTime() - staleProcessingMinutes * 60_000);
   const overdueReadyBefore = new Date(
     now.getTime() - readyPendingMinutes * 60_000,
   );

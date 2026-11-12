@@ -1,36 +1,56 @@
-import { createHash } from 'node:crypto';
-import type { ProspectIntakeInput, ProspectIntakeResult } from '../intake/prospect-intake.js';
-import type { ResearchRequest } from '../research/prospect-research.js';
+import { createHash } from "node:crypto";
+import type {
+  ProspectIntakeInput,
+  ProspectIntakeResult,
+} from "../intake/prospect-intake.js";
+import type { ResearchRequest } from "../research/prospect-research.js";
 
 export type IntakeField = keyof ProspectIntakeInput;
 export type IntakeFormValues = Partial<Record<IntakeField, string>>;
-type ProspectField = Exclude<IntakeField, 'requestId'>;
+type ProspectField = Exclude<IntakeField, "requestId">;
 
 // The durable research fields the pages show: identifiers and state, never research content.
-export type ResearchSummary = Pick<ResearchRequest, 'id' | 'status' | 'updated_at' | 'last_error' | 'brief_url'>;
+export type ResearchSummary = Pick<
+  ResearchRequest,
+  "id" | "status" | "updated_at" | "last_error" | "brief_url"
+>;
 // What this server process knows beyond the durable request: it is running the workflow, or its last start stopped.
-export type LocalResearchRun = 'running' | 'stopped' | 'idle';
-export type ResearchOffer = 'start' | 'status' | 'no-website' | 'none';
-export const RESEARCH_START_PATH = '/research/start';
-export const RESEARCH_STATUS_PATH = '/research';
-export const RESEARCH_PROSPECT_FIELD = 'prospectId';
-export const RESEARCH_CONFIRM_VALUE = 'start-research-only';
+export type LocalResearchRun = "running" | "stopped" | "idle";
+export type ResearchOffer = "start" | "status" | "no-website" | "none";
+export const RESEARCH_START_PATH = "/research/start";
+export const RESEARCH_STATUS_PATH = "/research";
+export const RESEARCH_PROSPECT_FIELD = "prospectId";
+export const RESEARCH_CONFIRM_VALUE = "start-research-only";
 export const researchStatusPath = (prospectId: string) =>
   `${RESEARCH_STATUS_PATH}?${RESEARCH_PROSPECT_FIELD}=${encodeURIComponent(prospectId)}`;
 
 // Labels only: prospect intake owns every validation rule, so the form adds no client-side constraints.
-const FIELDS: Record<ProspectField, { label: string; required?: true; multiline?: true; inputMode?: 'url' | 'email' }> = {
-  companyName: { label: 'Company name', required: true },
-  website: { label: 'Website', inputMode: 'url' },
-  industry: { label: 'Industry' },
-  contactName: { label: 'Contact name' },
-  contactEmail: { label: 'Contact email', inputMode: 'email' },
-  primaryDiscoveryQuestion: { label: 'Primary discovery question', multiline: true },
+const FIELDS: Record<
+  ProspectField,
+  {
+    label: string;
+    required?: true;
+    multiline?: true;
+    inputMode?: "url" | "email";
+  }
+> = {
+  companyName: { label: "Company name", required: true },
+  website: { label: "Website", inputMode: "url" },
+  industry: { label: "Industry" },
+  contactName: { label: "Contact name" },
+  contactEmail: { label: "Contact email", inputMode: "email" },
+  primaryDiscoveryQuestion: {
+    label: "Primary discovery question",
+    multiline: true,
+  },
 };
 const PROSPECT_FIELDS = Object.keys(FIELDS) as ProspectField[];
-export const INTAKE_FIELDS: readonly IntakeField[] = ['requestId', ...PROSPECT_FIELDS];
-export const INTAKE_CONFIRM_FIELD = 'confirm';
-export const INTAKE_CONFIRM_VALUE = 'create-prospect';
+export const INTAKE_FIELDS: readonly IntakeField[] = [
+  "requestId",
+  ...PROSPECT_FIELDS,
+];
+export const INTAKE_CONFIRM_FIELD = "confirm";
+export const INTAKE_CONFIRM_VALUE = "create-prospect";
 
 const STYLE = `
 :root{color-scheme:light dark;--bg:#f6f7f9;--panel:#fff;--text:#1d2330;--muted:#5b6475;--line:#d8dce3;--accent:#1f5eff;--on-accent:#fff;--error-bg:#fdecec;--error-line:#e3a5a5;--warn-bg:#fff6e0;--warn-line:#e5c77a;--ok-bg:#e9f7ef;--ok-line:#9fd3b3}
@@ -71,19 +91,25 @@ a{color:var(--accent)}
 // The policy permits only this exact inline stylesheet: no scripts, frames, or external loads.
 export const INTAKE_PAGE_CSP = [
   "default-src 'none'",
-  `style-src 'sha256-${createHash('sha256').update(STYLE).digest('base64')}'`,
+  `style-src 'sha256-${createHash("sha256").update(STYLE).digest("base64")}'`,
   "form-action 'self'",
   "frame-ancestors 'none'",
   "base-uri 'none'",
-].join('; ');
+].join("; ");
 
-const ENTITIES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const ENTITIES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
 
 export function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, character => ENTITIES[character]!);
+  return value.replace(/[&<>"']/g, (character) => ENTITIES[character]!);
 }
 
-function page(title: string, content: string, head = ''): string {
+function page(title: string, content: string, head = ""): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -111,51 +137,67 @@ const startOver = '<p class="meta"><a href="/">Start a new intake</a></p>';
 function formField(name: ProspectField, value: string): string {
   const { label, required, multiline, inputMode } = FIELDS[name];
   const id = `field-${name}`;
-  const marker = required ? ' <span class="required">required</span>' : '';
+  const marker = required ? ' <span class="required">required</span>' : "";
   // The newline after <textarea> is dropped by HTML parsing, so the value survives unchanged.
   const control = multiline
     ? `<textarea id="${id}" name="${name}" rows="4" autocomplete="off">\n${escapeHtml(value)}</textarea>`
-    : `<input type="text" id="${id}" name="${name}"${inputMode ? ` inputmode="${inputMode}"` : ''} autocomplete="off" value="${escapeHtml(value)}">`;
+    : `<input type="text" id="${id}" name="${name}"${inputMode ? ` inputmode="${inputMode}"` : ""} autocomplete="off" value="${escapeHtml(value)}">`;
   return `<div class="field"><label for="${id}">${escapeHtml(label)}${marker}</label>${control}</div>`;
 }
 
-export function renderIntakeForm(options: { requestId: string; values?: IntakeFormValues; error?: string }): string {
+export function renderIntakeForm(options: {
+  requestId: string;
+  values?: IntakeFormValues;
+  error?: string;
+}): string {
   const values = options.values ?? {};
-  const error = options.error === undefined ? '' : `<div class="notice error" role="alert">
+  const error =
+    options.error === undefined
+      ? ""
+      : `<div class="notice error" role="alert">
 <p><strong>Relay did not accept this input.</strong></p>
 <p>${escapeHtml(options.error)}</p>
 </div>`;
-  return page('New prospect', `<h1>New prospect</h1>
+  return page(
+    "New prospect",
+    `<h1>New prospect</h1>
 <p>Enter the prospect's details. Relay shows a review step before it creates anything.</p>
 ${error}
 <form class="panel" method="post" action="/review" accept-charset="UTF-8" autocomplete="off">
-${hiddenField('requestId', options.requestId)}
-${PROSPECT_FIELDS.map(name => formField(name, values[name] ?? '')).join('\n')}
+${hiddenField("requestId", options.requestId)}
+${PROSPECT_FIELDS.map((name) => formField(name, values[name] ?? "")).join("\n")}
 <div class="actions"><button type="submit">Review prospect</button></div>
 </form>
 ${requestIdMeta(options.requestId)}
-${options.error === undefined ? '' : startOver}`);
+${options.error === undefined ? "" : startOver}`,
+  );
 }
 
 export function renderIntakeReview(input: ProspectIntakeInput): string {
-  const rows = PROSPECT_FIELDS.map(name => {
+  const rows = PROSPECT_FIELDS.map((name) => {
     const value = input[name];
-    const shown = value === null ? '<span class="empty">Not provided</span>' : escapeHtml(value);
+    const shown =
+      value === null
+        ? '<span class="empty">Not provided</span>'
+        : escapeHtml(value);
     return `<div><dt>${escapeHtml(FIELDS[name].label)}</dt><dd>${shown}</dd></div>`;
-  }).join('\n');
-  return page('Review prospect', `<h1>Review prospect</h1>
+  }).join("\n");
+  return page(
+    "Review prospect",
+    `<h1>Review prospect</h1>
 <p>Check these values. They are shown exactly as Relay will store them. Nothing is created until you confirm.</p>
 <form class="panel" method="post" action="/prospects" accept-charset="UTF-8">
 <dl>
 ${rows}
 </dl>
-${INTAKE_FIELDS.map(name => hiddenField(name, input[name] ?? '')).join('\n')}
+${INTAKE_FIELDS.map((name) => hiddenField(name, input[name] ?? "")).join("\n")}
 <div class="actions">
 <button type="submit" name="${INTAKE_CONFIRM_FIELD}" value="${INTAKE_CONFIRM_VALUE}">Confirm and create prospect</button>
 <button type="submit" class="secondary" formaction="/edit">Edit</button>
 </div>
 </form>
-${requestIdMeta(input.requestId)}`);
+${requestIdMeta(input.requestId)}`,
+  );
 }
 
 // Research starts only from this explicit submission; no page starts it on load.
@@ -166,20 +208,32 @@ ${hiddenField(RESEARCH_PROSPECT_FIELD, prospectId)}
 <div class="actions"><button type="submit" name="${INTAKE_CONFIRM_FIELD}" value="${RESEARCH_CONFIRM_VALUE}">Start Research</button></div>
 </form>`;
 
-export function renderIntakeSuccess(result: ProspectIntakeResult, submittedRequestId: string,
-  research: ResearchOffer = 'none'): string {
-  const heading = result.created ? 'Prospect created' : 'Prospect already recorded';
+export function renderIntakeSuccess(
+  result: ProspectIntakeResult,
+  submittedRequestId: string,
+  research: ResearchOffer = "none",
+): string {
+  const heading = result.created
+    ? "Prospect created"
+    : "Prospect already recorded";
   const summary = result.created
-    ? 'Relay created the prospect and recorded this intake request.'
-    : 'This intake matches one Relay already recorded. No new prospect was created.';
-  const replaced = result.requestId === submittedRequestId ? ''
-    : `<p>Request ID <code>${escapeHtml(submittedRequestId)}</code> was not used. The intake is recorded under the request ID below.</p>`;
-  const researchSection = research === 'start' ? researchStartForm(result.prospectId)
-    : research === 'status'
-      ? `<p class="meta"><a href="${escapeHtml(researchStatusPath(result.prospectId))}">View research status</a></p>`
-      : research === 'no-website' ? '<p class="meta">Research needs a website, so it is not offered for this prospect.</p>'
-        : '';
-  return page(heading, `<h1>${heading}</h1>
+    ? "Relay created the prospect and recorded this intake request."
+    : "This intake matches one Relay already recorded. No new prospect was created.";
+  const replaced =
+    result.requestId === submittedRequestId
+      ? ""
+      : `<p>Request ID <code>${escapeHtml(submittedRequestId)}</code> was not used. The intake is recorded under the request ID below.</p>`;
+  const researchSection =
+    research === "start"
+      ? researchStartForm(result.prospectId)
+      : research === "status"
+        ? `<p class="meta"><a href="${escapeHtml(researchStatusPath(result.prospectId))}">View research status</a></p>`
+        : research === "no-website"
+          ? '<p class="meta">Research needs a website, so it is not offered for this prospect.</p>'
+          : "";
+  return page(
+    heading,
+    `<h1>${heading}</h1>
 <div class="notice success" role="status"><p>${summary}</p>${replaced}</div>
 <div class="panel"><dl>
 <div><dt>Prospect ID</dt><dd><code>${escapeHtml(result.prospectId)}</code></dd></div>
@@ -187,15 +241,31 @@ export function renderIntakeSuccess(result: ProspectIntakeResult, submittedReque
 <div><dt>Intake request ID</dt><dd><code>${escapeHtml(result.requestId)}</code></dd></div>
 </dl></div>
 ${researchSection}
-<p class="meta"><a href="/">Start another intake</a></p>`);
+<p class="meta"><a href="/">Start another intake</a></p>`,
+  );
 }
 
-type ResearchState = { heading: string; tone: 'success' | 'warning' | 'error'; message: string };
-const RESEARCH_RUNNING: ResearchState = { heading: 'Research is running', tone: 'warning',
-  message: 'Relay is researching this prospect. This can take a few minutes.' };
-const completed = (message: string): ResearchState => ({ heading: 'Research completed', tone: 'success', message });
-const needsReview = (message: string): ResearchState => ({ heading: 'Research needs review', tone: 'error', message });
-const RESEARCH_STATES: Record<ResearchRequest['status'], ResearchState> = {
+type ResearchState = {
+  heading: string;
+  tone: "success" | "warning" | "error";
+  message: string;
+};
+const RESEARCH_RUNNING: ResearchState = {
+  heading: "Research is running",
+  tone: "warning",
+  message: "Relay is researching this prospect. This can take a few minutes.",
+};
+const completed = (message: string): ResearchState => ({
+  heading: "Research completed",
+  tone: "success",
+  message,
+});
+const needsReview = (message: string): ResearchState => ({
+  heading: "Research needs review",
+  tone: "error",
+  message,
+});
+const RESEARCH_STATES: Record<ResearchRequest["status"], ResearchState> = {
   researching: RESEARCH_RUNNING,
   research_ready: RESEARCH_RUNNING,
   folder_creating: RESEARCH_RUNNING,
@@ -203,70 +273,120 @@ const RESEARCH_STATES: Record<ResearchRequest['status'], ResearchState> = {
   brief_creating: RESEARCH_RUNNING,
   brief_ready: RESEARCH_RUNNING,
   draft_creating: RESEARCH_RUNNING,
-  research_review: completed('Research finished and the brief is ready for your review. No Gmail draft was created.'),
-  needs_contact: completed('Research finished but found no public contact email. No Gmail draft was created.'),
-  completed: completed('Research finished and a Gmail draft is waiting for review.'),
-  failed: needsReview('Research stopped. Have the request inspected before any retry.'),
-  needs_reconciliation: needsReview('A provider outcome is uncertain. Have Google Drive inspected before any recovery; do not start research again.'),
+  research_review: completed(
+    "Research finished and the brief is ready for your review. No Gmail draft was created.",
+  ),
+  needs_contact: completed(
+    "Research finished but found no public contact email. No Gmail draft was created.",
+  ),
+  completed: completed(
+    "Research finished and a Gmail draft is waiting for review.",
+  ),
+  failed: needsReview(
+    "Research stopped. Have the request inspected before any retry.",
+  ),
+  needs_reconciliation: needsReview(
+    "A provider outcome is uncertain. Have Google Drive inspected before any recovery; do not start research again.",
+  ),
 };
 
 // Statuses whose recorded last_error describes the current outcome; elsewhere it is retained history.
-const ERROR_SHOWN_STATUSES: ReadonlySet<ResearchRequest['status']> = new Set(['failed', 'needs_reconciliation']);
+const ERROR_SHOWN_STATUSES: ReadonlySet<ResearchRequest["status"]> = new Set([
+  "failed",
+  "needs_reconciliation",
+]);
 
 // Shows durable state only. It never offers Start Research: eligibility is not known here.
-export function renderResearchStatus(view: { prospectId: string; request: ResearchSummary | null;
-  local: LocalResearchRun }): string {
+export function renderResearchStatus(view: {
+  prospectId: string;
+  request: ResearchSummary | null;
+  local: LocalResearchRun;
+}): string {
   const { prospectId, request, local } = view;
-  const state: ResearchState = request ? RESEARCH_STATES[request.status]
-    : local === 'running' ? { ...RESEARCH_RUNNING, message: 'Relay is starting research for this prospect.' }
-      : local === 'stopped' ? { heading: 'Research did not start', tone: 'error',
-        message: 'Relay could not begin research and recorded no research request. The prospect may not be eligible '
-          + '(research needs a website and a prospect with no earlier research or outreach), or the research '
-          + 'configuration may be incomplete. The intake UI log records the attempt.' }
-        : { heading: 'Research not started', tone: 'warning', message: 'No research has been started for this prospect.' };
-  const running = state === RESEARCH_RUNNING || (!request && local === 'running');
+  const state: ResearchState = request
+    ? RESEARCH_STATES[request.status]
+    : local === "running"
+      ? {
+          ...RESEARCH_RUNNING,
+          message: "Relay is starting research for this prospect.",
+        }
+      : local === "stopped"
+        ? {
+            heading: "Research did not start",
+            tone: "error",
+            message:
+              "Relay could not begin research and recorded no research request. The prospect may not be eligible " +
+              "(research needs a website and a prospect with no earlier research or outreach), or the research " +
+              "configuration may be incomplete. The intake UI log records the attempt.",
+          }
+        : {
+            heading: "Research not started",
+            tone: "warning",
+            message: "No research has been started for this prospect.",
+          };
+  const running =
+    state === RESEARCH_RUNNING || (!request && local === "running");
   // Pages carry no scripts, so a running page reloads itself only while this process is doing the work.
-  const refresh = running && local === 'running';
-  const elsewhere = running && !refresh
-    ? `<p>This intake UI process is not running this research. It may be running elsewhere or may have been interrupted. Reload to check again; if the status stops changing, inspect it with <code>npm run research -- status --prospect ${escapeHtml(prospectId)}</code>.</p>`
-    : '';
-  const lastError = request?.last_error && ERROR_SHOWN_STATUSES.has(request.status)
-    ? `<p>${escapeHtml(request.last_error)}</p>` : '';
-  const brief = request?.brief_url && /^https:\/\/(?:drive|docs)\.google\.com\//.test(request.brief_url)
-    ? `<div><dt>Research brief</dt><dd><a href="${escapeHtml(request.brief_url)}" rel="noreferrer">Open in Google Drive</a></dd></div>`
-    : '';
-  const details = request ? `<div><dt>Research status</dt><dd><code>${escapeHtml(request.status)}</code></dd></div>
+  const refresh = running && local === "running";
+  const elsewhere =
+    running && !refresh
+      ? `<p>This intake UI process is not running this research. It may be running elsewhere or may have been interrupted. Reload to check again; if the status stops changing, inspect it with <code>npm run research -- status --prospect ${escapeHtml(prospectId)}</code>.</p>`
+      : "";
+  const lastError =
+    request?.last_error && ERROR_SHOWN_STATUSES.has(request.status)
+      ? `<p>${escapeHtml(request.last_error)}</p>`
+      : "";
+  const brief =
+    request?.brief_url &&
+    /^https:\/\/(?:drive|docs)\.google\.com\//.test(request.brief_url)
+      ? `<div><dt>Research brief</dt><dd><a href="${escapeHtml(request.brief_url)}" rel="noreferrer">Open in Google Drive</a></dd></div>`
+      : "";
+  const details = request
+    ? `<div><dt>Research status</dt><dd><code>${escapeHtml(request.status)}</code></dd></div>
 <div><dt>Research request ID</dt><dd><code>${escapeHtml(request.id)}</code></dd></div>
 <div><dt>Last updated</dt><dd>${escapeHtml(new Date(request.updated_at).toISOString())}</dd></div>
-${brief}` : '';
-  return page(state.heading, `<h1>${state.heading}</h1>
+${brief}`
+    : "";
+  return page(
+    state.heading,
+    `<h1>${state.heading}</h1>
 <div class="notice ${state.tone}" role="status">
 <p>${state.message}</p>${lastError}${elsewhere}
-${refresh ? '<p>This page refreshes every few seconds.</p>' : ''}
+${refresh ? "<p>This page refreshes every few seconds.</p>" : ""}
 </div>
 <div class="panel"><dl>
 <div><dt>Prospect ID</dt><dd><code>${escapeHtml(prospectId)}</code></dd></div>
 ${details}
 </dl></div>
-${running && !refresh ? `<p class="meta"><a href="${escapeHtml(researchStatusPath(prospectId))}">Reload status</a></p>` : ''}
-${startOver}`, refresh ? '\n<meta http-equiv="refresh" content="5">' : '');
+${running && !refresh ? `<p class="meta"><a href="${escapeHtml(researchStatusPath(prospectId))}">Reload status</a></p>` : ""}
+${startOver}`,
+    refresh ? '\n<meta http-equiv="refresh" content="5">' : "",
+  );
 }
 
 // Intake conflicts roll back before any write, so this outcome is definite.
-export function renderIntakeConflict(requestId: string, message: string): string {
-  return page('Intake needs inspection', `<h1>Intake needs inspection</h1>
+export function renderIntakeConflict(
+  requestId: string,
+  message: string,
+): string {
+  return page(
+    "Intake needs inspection",
+    `<h1>Intake needs inspection</h1>
 <div class="notice error" role="alert">
 <p><strong>Relay did not create or change a prospect.</strong></p>
 <p>${escapeHtml(message)}</p>
 </div>
 <p>Have this intake inspected before continuing. Do not change the request ID or the input to get past this conflict.</p>
-${requestIdMeta(requestId)}`);
+${requestIdMeta(requestId)}`,
+  );
 }
 
 // Takes only the request ID so the page cannot echo submitted input or internal error details.
 export function renderIntakeOutcomeUnknown(requestId: string): string {
   const id = `<code>${escapeHtml(requestId)}</code>`;
-  return page('Outcome unknown', `<h1>Prospect outcome unknown</h1>
+  return page(
+    "Outcome unknown",
+    `<h1>Prospect outcome unknown</h1>
 <div class="notice warning" role="alert">
 <p><strong>Relay could not confirm whether the prospect was created.</strong></p>
 <p>Do not start a new intake and do not change any values.</p>
@@ -279,11 +399,15 @@ export function renderIntakeOutcomeUnknown(requestId: string): string {
 </ol>
 <p>Retrying with the same request ID and the same values cannot create a second prospect.</p>
 <p>If the retry also fails, stop and have intake request ${id} inspected.</p>
-</div>`);
+</div>`,
+  );
 }
 
 export function renderErrorPage(title: string, message: string): string {
-  return page(title, `<h1>${escapeHtml(title)}</h1>
+  return page(
+    title,
+    `<h1>${escapeHtml(title)}</h1>
 <div class="notice error" role="alert"><p>${escapeHtml(message)}</p></div>
-${startOver}`);
+${startOver}`,
+  );
 }

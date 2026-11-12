@@ -9,8 +9,12 @@ export function assertVerificationDatabaseOwnership(
   expectedUser: string,
   expectedNonce: string,
 ) {
-  if (!row || row.database_user !== expectedUser || row.database_name !== 'relay_test'
-    || row.ownership_nonce !== expectedNonce) {
-    throw new Error('Verification database ownership could not be proven.');
+  if (
+    !row ||
+    row.database_user !== expectedUser ||
+    row.database_name !== "relay_test" ||
+    row.ownership_nonce !== expectedNonce
+  ) {
+    throw new Error("Verification database ownership could not be proven.");
   }
 }

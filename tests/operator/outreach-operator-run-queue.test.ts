@@ -29,14 +29,7 @@ test("Outreach operator runner: executes confirmed draft queueing", async () => 
   let outputValue: unknown = null;
 
   await runOutreachOperator(
-    [
-      "queue",
-      "--prospect",
-      prospectId,
-      "--draft",
-      draftId,
-      "--confirm-queue",
-    ],
+    ["queue", "--prospect", prospectId, "--draft", draftId, "--confirm-queue"],
     {
       inspectJob: async () => null,
       inspectQueue: async () => [],

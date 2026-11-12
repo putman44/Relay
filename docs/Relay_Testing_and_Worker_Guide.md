@@ -124,17 +124,17 @@ stateDiagram-v2
 
 ### Legal transitions
 
-| From         | To           |           Allowed? | Function                     |
-| ------------ | ------------ | -----------------: | ---------------------------- |
-| `pending`    | `processing` |                Yes | `claimNextOutreachJob()`     |
-| `processing` | `completed`  |                Yes | `completeOutreachJob(jobId)` |
-| `processing` | `pending`    |                Yes | `retryOutreachJob(...)`      |
-| `processing` | `failed`     |                Yes | `failOutreachJob(...)`       |
-| `pending`    | `completed`  |                 No | Guarded                      |
-| `pending`    | `failed`     |                 No | Guarded                      |
-| `completed`  | `completed`  |                 No | Guarded                      |
-| `failed`     | `processing` | No automatic claim | Terminal for automatic work  |
-| `failed`     | `pending`    | Guarded manual only | `requeueFailedOutreachJob()`  |
+| From         | To           |            Allowed? | Function                     |
+| ------------ | ------------ | ------------------: | ---------------------------- |
+| `pending`    | `processing` |                 Yes | `claimNextOutreachJob()`     |
+| `processing` | `completed`  |                 Yes | `completeOutreachJob(jobId)` |
+| `processing` | `pending`    |                 Yes | `retryOutreachJob(...)`      |
+| `processing` | `failed`     |                 Yes | `failOutreachJob(...)`       |
+| `pending`    | `completed`  |                  No | Guarded                      |
+| `pending`    | `failed`     |                  No | Guarded                      |
+| `completed`  | `completed`  |                  No | Guarded                      |
+| `failed`     | `processing` |  No automatic claim | Terminal for automatic work  |
+| `failed`     | `pending`    | Guarded manual only | `requeueFailedOutreachJob()` |
 
 ---
 
@@ -434,81 +434,81 @@ The suite currently contains **139 tests**, with **139 passing and 0 failing** a
 
 ## A. Gmail Integration and Outreach Safety Tests
 
-| Test file                                   | Test                                                                                                     | What it protects                                                                       |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `gmail-api-client.test.ts`                  | Gmail auth: creates Gmail API compatible with draft sender                                               | Production auth wiring supplies the API shape required by the sender.                  |
-| `gmail-auth-missing-refresh-token.test.ts`  | Gmail auth: rejects missing refresh token                                                                | Production Gmail setup fails closed when credentials are incomplete.                   |
-| `gmail-auth.test.ts`                        | Gmail auth: loads complete OAuth credentials                                                             | Required OAuth configuration is loaded into the runtime boundary.                      |
-| `gmail-draft-sender-incomplete-response.test.ts` | Gmail draft sender: rejects an incomplete Gmail response                                            | Missing confirmed message evidence is never treated as a successful send.              |
-| `gmail-draft-sender.test.ts`                | Gmail draft sender: sends the exact Gmail draft and returns message IDs                                  | The sender uses the claimed Gmail draft and returns finalization evidence.              |
-| `gmail-oauth-client.test.ts`                | Gmail auth: configures OAuth client with refresh token                                                    | OAuth refresh credentials are installed on the Gmail client.                           |
-| `gmail-reconciliation.test.ts`              | Gmail reconciliation: marks an uncertain Gmail send for reconciliation                                   | An uncertain send is routed to reconciliation instead of treated as confirmed success. |
-| `gmail-runtime.test.ts`                     | Gmail runtime: creates a production draft sender from environment credentials                            | The production processor can construct the real Gmail sender.                          |
-| `gmail-success.test.ts`                     | Gmail success: marks the draft sent after a confirmed Gmail send                                         | A confirmed Gmail send moves the draft into its successful sent state.                 |
-| `invalid-prospect-stage.test.ts`            | Invalid prospect stage: rejects an outreach draft when the prospect is not draft_ready                   | Outreach cannot proceed from an invalid prospect stage.                                |
-| `message-draft-by-id-missing.test.ts`       | Message draft lookup: returns null when the draft ID does not exist                                       | Job processing fails closed when its referenced draft is missing.                      |
-| `message-draft-by-id.test.ts`               | Message draft lookup: returns the exact draft by ID                                                       | A queue job resolves its specific draft instead of selecting another draft.             |
-| `outreach-already-sent.test.ts`             | Outreach already sent: rejects a draft because it was already sent                                       | Prevents repeat sending after completion.                                              |
-| `outreach-claim-validation.test.ts`         | Outreach claim validation: rejects an unapproved outreach draft                                          | Only an approved draft can be claimed for outreach.                                    |
-| `outreach-completion-guard.test.ts`         | Outreach completion guard: rejects completion when the draft is still pending                            | Prevents skipping the required send/processing state.                                  |
-| `outreach-concurrent-claim.test.ts`         | Outreach concurrent claim: allows only one worker to claim the same draft concurrently                   | Prevents two callers from claiming the same outreach draft.                            |
-| `outreach-duplicate-completion.test.ts`     | Outreach duplicate completion: rejects duplicate completion after the draft is already sent              | Prevents a completed send from being completed again.                                  |
-| `outreach-duplicate-reconciliation.test.ts` | Outreach duplicate reconciliation: rejects duplicate reconciliation without mutating the original record | Prevents duplicate reconciliation operations.                                          |
-| `outreach-missing-gmail-draft.test.ts`      | Outreach missing Gmail draft: rejects an outreach draft without a Gmail draft ID                         | Prevents sending when Gmail draft identity is missing.                                 |
-| `outreach-recipient-mismatch.test.ts`       | Outreach recipient mismatch: rejects an outreach draft with a mismatched recipient                       | Prevents sending to an unexpected recipient.                                           |
-| `outreach-reconciliation-guard.test.ts`     | Outreach reconciliation guard: rejects reconciliation when the draft is still pending                    | Reconciliation cannot be applied from the wrong state.                                 |
-| `outreach-reconciliation-not-sent.test.ts`  | Outreach reconciliation: confirmed not sent returns draft to pending                                     | Human-verified non-send can safely restore `pending` and `draft_ready`.                 |
-| `outreach-reconciliation-rejects-pending.test.ts` | Outreach reconciliation: rejects a draft that is not awaiting reconciliation                       | The resolver cannot reset an ordinary pending draft.                                   |
-| `outreach-wrong-prospect.test.ts`           | Outreach wrong prospect: rejects an outreach draft when it belongs to a different prospect               | Prevents cross-prospect draft misuse.                                                  |
+| Test file                                         | Test                                                                                                     | What it protects                                                                       |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `gmail-api-client.test.ts`                        | Gmail auth: creates Gmail API compatible with draft sender                                               | Production auth wiring supplies the API shape required by the sender.                  |
+| `gmail-auth-missing-refresh-token.test.ts`        | Gmail auth: rejects missing refresh token                                                                | Production Gmail setup fails closed when credentials are incomplete.                   |
+| `gmail-auth.test.ts`                              | Gmail auth: loads complete OAuth credentials                                                             | Required OAuth configuration is loaded into the runtime boundary.                      |
+| `gmail-draft-sender-incomplete-response.test.ts`  | Gmail draft sender: rejects an incomplete Gmail response                                                 | Missing confirmed message evidence is never treated as a successful send.              |
+| `gmail-draft-sender.test.ts`                      | Gmail draft sender: sends the exact Gmail draft and returns message IDs                                  | The sender uses the claimed Gmail draft and returns finalization evidence.             |
+| `gmail-oauth-client.test.ts`                      | Gmail auth: configures OAuth client with refresh token                                                   | OAuth refresh credentials are installed on the Gmail client.                           |
+| `gmail-reconciliation.test.ts`                    | Gmail reconciliation: marks an uncertain Gmail send for reconciliation                                   | An uncertain send is routed to reconciliation instead of treated as confirmed success. |
+| `gmail-runtime.test.ts`                           | Gmail runtime: creates a production draft sender from environment credentials                            | The production processor can construct the real Gmail sender.                          |
+| `gmail-success.test.ts`                           | Gmail success: marks the draft sent after a confirmed Gmail send                                         | A confirmed Gmail send moves the draft into its successful sent state.                 |
+| `invalid-prospect-stage.test.ts`                  | Invalid prospect stage: rejects an outreach draft when the prospect is not draft_ready                   | Outreach cannot proceed from an invalid prospect stage.                                |
+| `message-draft-by-id-missing.test.ts`             | Message draft lookup: returns null when the draft ID does not exist                                      | Job processing fails closed when its referenced draft is missing.                      |
+| `message-draft-by-id.test.ts`                     | Message draft lookup: returns the exact draft by ID                                                      | A queue job resolves its specific draft instead of selecting another draft.            |
+| `outreach-already-sent.test.ts`                   | Outreach already sent: rejects a draft because it was already sent                                       | Prevents repeat sending after completion.                                              |
+| `outreach-claim-validation.test.ts`               | Outreach claim validation: rejects an unapproved outreach draft                                          | Only an approved draft can be claimed for outreach.                                    |
+| `outreach-completion-guard.test.ts`               | Outreach completion guard: rejects completion when the draft is still pending                            | Prevents skipping the required send/processing state.                                  |
+| `outreach-concurrent-claim.test.ts`               | Outreach concurrent claim: allows only one worker to claim the same draft concurrently                   | Prevents two callers from claiming the same outreach draft.                            |
+| `outreach-duplicate-completion.test.ts`           | Outreach duplicate completion: rejects duplicate completion after the draft is already sent              | Prevents a completed send from being completed again.                                  |
+| `outreach-duplicate-reconciliation.test.ts`       | Outreach duplicate reconciliation: rejects duplicate reconciliation without mutating the original record | Prevents duplicate reconciliation operations.                                          |
+| `outreach-missing-gmail-draft.test.ts`            | Outreach missing Gmail draft: rejects an outreach draft without a Gmail draft ID                         | Prevents sending when Gmail draft identity is missing.                                 |
+| `outreach-recipient-mismatch.test.ts`             | Outreach recipient mismatch: rejects an outreach draft with a mismatched recipient                       | Prevents sending to an unexpected recipient.                                           |
+| `outreach-reconciliation-guard.test.ts`           | Outreach reconciliation guard: rejects reconciliation when the draft is still pending                    | Reconciliation cannot be applied from the wrong state.                                 |
+| `outreach-reconciliation-not-sent.test.ts`        | Outreach reconciliation: confirmed not sent returns draft to pending                                     | Human-verified non-send can safely restore `pending` and `draft_ready`.                |
+| `outreach-reconciliation-rejects-pending.test.ts` | Outreach reconciliation: rejects a draft that is not awaiting reconciliation                             | The resolver cannot reset an ordinary pending draft.                                   |
+| `outreach-wrong-prospect.test.ts`                 | Outreach wrong prospect: rejects an outreach draft when it belongs to a different prospect               | Prevents cross-prospect draft misuse.                                                  |
 
 ## B. Outreach Job Queue Tests
 
-| Test file                                   | Test                                                                                    | What it protects                                                   |
-| ------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `outreach-job-creation.test.ts`             | Outreach job creation: creates a pending outreach job for a draft                       | New jobs start correctly in `pending`.                             |
-| `outreach-job-claim.test.ts`                | Outreach job claim: claims the next pending outreach job                                | An eligible pending job becomes `processing`.                      |
-| `outreach-job-empty-claim.test.ts`          | Outreach job empty claim: returns null when no pending job is available                 | Empty queues are handled normally.                                 |
-| `outreach-job-concurrent-claim.test.ts`     | Outreach job concurrent claim: allows only one worker to claim a pending job            | Prevents queue double-claiming.                                    |
-| `outreach-job-completion.test.ts`           | Outreach job completion: marks a processing job completed                               | Valid `processing -> completed` transition works.                  |
-| `outreach-job-completion-guard.test.ts`     | Outreach job completion guard: rejects completion when the job is still pending         | Prevents `pending -> completed`.                                   |
-| `outreach-job-duplicate-completion.test.ts` | Outreach job duplicate completion: rejects completion when the job is already completed | Prevents repeated completion.                                      |
-| `outreach-job-retry.test.ts`                | Outreach job retry: returns a processing job to pending for a later attempt             | Retry state is stored correctly.                                   |
-| `outreach-job-retry-delay.test.ts`          | Outreach job retry delay: does not claim a retry before it is available                 | Future `available_at` actually delays claiming.                    |
-| `outreach-job-retry-claim.test.ts`          | Outreach job retry claim: claims an eligible retry as a second attempt                  | Eligible retries return to processing and increment attempt count. |
-| `outreach-job-failure.test.ts`              | Outreach job failure: marks a processing job failed                                     | Valid terminal failure works.                                      |
-| `outreach-job-failure-guard.test.ts`        | Outreach job failure guard: rejects failure when the job is still pending               | Prevents `pending -> failed`.                                      |
-| `outreach-job-failed-claim.test.ts`         | Outreach job failed claim: does not claim a terminally failed job                       | Failed jobs stay out of the queue.                                 |
-| `outreach-job-requeue.test.ts`              | Outreach job requeue: safely requeues a failed send-ready job                           | Verified-safe manual recovery reuses the failed job without erasing audit state. |
-| `outreach-job-requeue-rejects-reconciliation.test.ts` | Outreach job requeue: rejects a draft still awaiting reconciliation          | An ambiguous Gmail outcome cannot be blindly returned to the queue. |
-| `outreach-job-stale-detection.test.ts`      | Outreach job stale detection: finds a processing job claimed before the cutoff          | Old abandoned processing jobs can be detected.                     |
-| `outreach-job-fresh-detection.test.ts`      | Outreach job stale detection: ignores a recently claimed processing job                 | Fresh processing work is not falsely labeled stale.                |
+| Test file                                             | Test                                                                                    | What it protects                                                                 |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `outreach-job-creation.test.ts`                       | Outreach job creation: creates a pending outreach job for a draft                       | New jobs start correctly in `pending`.                                           |
+| `outreach-job-claim.test.ts`                          | Outreach job claim: claims the next pending outreach job                                | An eligible pending job becomes `processing`.                                    |
+| `outreach-job-empty-claim.test.ts`                    | Outreach job empty claim: returns null when no pending job is available                 | Empty queues are handled normally.                                               |
+| `outreach-job-concurrent-claim.test.ts`               | Outreach job concurrent claim: allows only one worker to claim a pending job            | Prevents queue double-claiming.                                                  |
+| `outreach-job-completion.test.ts`                     | Outreach job completion: marks a processing job completed                               | Valid `processing -> completed` transition works.                                |
+| `outreach-job-completion-guard.test.ts`               | Outreach job completion guard: rejects completion when the job is still pending         | Prevents `pending -> completed`.                                                 |
+| `outreach-job-duplicate-completion.test.ts`           | Outreach job duplicate completion: rejects completion when the job is already completed | Prevents repeated completion.                                                    |
+| `outreach-job-retry.test.ts`                          | Outreach job retry: returns a processing job to pending for a later attempt             | Retry state is stored correctly.                                                 |
+| `outreach-job-retry-delay.test.ts`                    | Outreach job retry delay: does not claim a retry before it is available                 | Future `available_at` actually delays claiming.                                  |
+| `outreach-job-retry-claim.test.ts`                    | Outreach job retry claim: claims an eligible retry as a second attempt                  | Eligible retries return to processing and increment attempt count.               |
+| `outreach-job-failure.test.ts`                        | Outreach job failure: marks a processing job failed                                     | Valid terminal failure works.                                                    |
+| `outreach-job-failure-guard.test.ts`                  | Outreach job failure guard: rejects failure when the job is still pending               | Prevents `pending -> failed`.                                                    |
+| `outreach-job-failed-claim.test.ts`                   | Outreach job failed claim: does not claim a terminally failed job                       | Failed jobs stay out of the queue.                                               |
+| `outreach-job-requeue.test.ts`                        | Outreach job requeue: safely requeues a failed send-ready job                           | Verified-safe manual recovery reuses the failed job without erasing audit state. |
+| `outreach-job-requeue-rejects-reconciliation.test.ts` | Outreach job requeue: rejects a draft still awaiting reconciliation                     | An ambiguous Gmail outcome cannot be blindly returned to the queue.              |
+| `outreach-job-stale-detection.test.ts`                | Outreach job stale detection: finds a processing job claimed before the cutoff          | Old abandoned processing jobs can be detected.                                   |
+| `outreach-job-fresh-detection.test.ts`                | Outreach job stale detection: ignores a recently claimed processing job                 | Fresh processing work is not falsely labeled stale.                              |
 
 ## C. Production Outreach Processor Tests
 
-| Test file                                               | Test                                                                                | What it protects                                                        |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `process-outreach-job-claim.test.ts`                    | Outreach job processing: claims the exact referenced draft                         | The processor sends only the draft named by the claimed queue job.      |
-| `process-outreach-job-finalization-throws.test.ts`      | Outreach job processing: finalization failure after confirmed send is non-retryable | A confirmed Gmail side effect is never repeated after a database error. |
-| `process-outreach-job-rejected-claim.test.ts`           | Outreach job processing: rejected claim is non-retryable                           | Business-rule rejection cannot enter a retry loop.                      |
-| `process-outreach-job-sender-throws.test.ts`            | Outreach job processing: thrown Gmail sender error requires reconciliation          | A thrown Gmail outcome fails closed instead of retrying.                |
-| `process-outreach-job-uncertain.test.ts`                | Outreach job processing: uncertain Gmail result requires reconciliation             | Explicit uncertainty persists reconciliation state.                     |
-| `resolve-outreach-job-draft-missing.test.ts`            | Outreach job draft resolution: missing draft is non-retryable                       | Missing durable state fails immediately.                               |
-| `resolve-outreach-job-draft.test.ts`                    | Outreach job draft resolution: returns the draft referenced by the job              | Draft lookup follows the job's exact `draft_id`.                        |
+| Test file                                          | Test                                                                                | What it protects                                                        |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `process-outreach-job-claim.test.ts`               | Outreach job processing: claims the exact referenced draft                          | The processor sends only the draft named by the claimed queue job.      |
+| `process-outreach-job-finalization-throws.test.ts` | Outreach job processing: finalization failure after confirmed send is non-retryable | A confirmed Gmail side effect is never repeated after a database error. |
+| `process-outreach-job-rejected-claim.test.ts`      | Outreach job processing: rejected claim is non-retryable                            | Business-rule rejection cannot enter a retry loop.                      |
+| `process-outreach-job-sender-throws.test.ts`       | Outreach job processing: thrown Gmail sender error requires reconciliation          | A thrown Gmail outcome fails closed instead of retrying.                |
+| `process-outreach-job-uncertain.test.ts`           | Outreach job processing: uncertain Gmail result requires reconciliation             | Explicit uncertainty persists reconciliation state.                     |
+| `resolve-outreach-job-draft-missing.test.ts`       | Outreach job draft resolution: missing draft is non-retryable                       | Missing durable state fails immediately.                                |
+| `resolve-outreach-job-draft.test.ts`               | Outreach job draft resolution: returns the draft referenced by the job              | Draft lookup follows the job's exact `draft_id`.                        |
 
 ## D. Worker Behavior and Runtime Tests
 
-| Test file                         | Test                                                                      | What it protects                                         |
-| --------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `outreach-worker-success.test.ts` | Outreach worker success: processes and completes the next job             | Worker coordinates claim -> processing -> completion.    |
-| `outreach-worker-empty.test.ts`   | Outreach worker empty queue: returns null without processing a job        | Worker safely handles no work.                           |
-| `outreach-worker-retry.test.ts`   | Outreach worker retry: schedules a failed first attempt for retry         | Ordinary early failures go back to pending with a delay. |
-| `outreach-worker-failure.test.ts` | Outreach worker failure: marks the third failed attempt terminally failed | Worker stops retrying after max attempts.                |
-| `outreach-worker-non-retryable.test.ts` | Outreach worker non-retryable failure: fails on the first attempt   | Side-effect-sensitive failures bypass automatic retry.   |
-| `outreach-worker-processor-success.test.ts` | Outreach worker integration: completes a job after a confirmed send | The worker and production processor complete the durable job together. |
-| `outreach-worker-processor-uncertain.test.ts` | Outreach worker integration: uncertain send fails without retry   | Gmail uncertainty becomes a failed job requiring reconciliation. |
-| `outreach-worker-runtime.test.ts` | Outreach worker runtime: creates a production processor                    | Runtime wiring connects worker processing to Gmail.      |
-| `live-outreach-send-guard.test.ts` | Live outreach guard: rejects when live sending is not explicitly enabled   | Production sending defaults to disabled.                 |
-| `live-outreach-send-guard-enabled.test.ts` | Live outreach guard: allows live sending when explicitly enabled | The explicit production gate has one auditable opt-in value. |
+| Test file                                     | Test                                                                      | What it protects                                                       |
+| --------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `outreach-worker-success.test.ts`             | Outreach worker success: processes and completes the next job             | Worker coordinates claim -> processing -> completion.                  |
+| `outreach-worker-empty.test.ts`               | Outreach worker empty queue: returns null without processing a job        | Worker safely handles no work.                                         |
+| `outreach-worker-retry.test.ts`               | Outreach worker retry: schedules a failed first attempt for retry         | Ordinary early failures go back to pending with a delay.               |
+| `outreach-worker-failure.test.ts`             | Outreach worker failure: marks the third failed attempt terminally failed | Worker stops retrying after max attempts.                              |
+| `outreach-worker-non-retryable.test.ts`       | Outreach worker non-retryable failure: fails on the first attempt         | Side-effect-sensitive failures bypass automatic retry.                 |
+| `outreach-worker-processor-success.test.ts`   | Outreach worker integration: completes a job after a confirmed send       | The worker and production processor complete the durable job together. |
+| `outreach-worker-processor-uncertain.test.ts` | Outreach worker integration: uncertain send fails without retry           | Gmail uncertainty becomes a failed job requiring reconciliation.       |
+| `outreach-worker-runtime.test.ts`             | Outreach worker runtime: creates a production processor                   | Runtime wiring connects worker processing to Gmail.                    |
+| `live-outreach-send-guard.test.ts`            | Live outreach guard: rejects when live sending is not explicitly enabled  | Production sending defaults to disabled.                               |
+| `live-outreach-send-guard-enabled.test.ts`    | Live outreach guard: allows live sending when explicitly enabled          | The explicit production gate has one auditable opt-in value.           |
 
 ## E. Worker Logging Tests
 
@@ -521,97 +521,97 @@ The suite currently contains **139 tests**, with **139 passing and 0 failing** a
 
 ## F. Atomic Reconciliation and Requeue Tests
 
-| Test file | Test | What it protects |
-| --- | --- | --- |
-| `outreach-job-reconcile-and-requeue-missing-job.test.ts` | Outreach reconciliation requeue: rejects a missing job | Recovery cannot invent or mutate a missing job. |
-| `outreach-job-reconcile-and-requeue-rejection-preserves-state.test.ts` | Outreach reconciliation requeue: rejected recovery preserves all state | A rejected recovery attempt leaves the job, draft, and prospect unchanged. |
-| `outreach-job-reconcile-and-requeue-rejects-draft-state.test.ts` | Outreach reconciliation requeue: rejects a draft that is not awaiting reconciliation | Only reconciliation-state drafts enter atomic recovery. |
-| `outreach-job-reconcile-and-requeue-rejects-message-id.test.ts` | Outreach reconciliation requeue: rejects confirmed sent message evidence | A recorded Gmail message ID blocks requeue. |
-| `outreach-job-reconcile-and-requeue-rejects-nonfailed.test.ts` | Outreach reconciliation requeue: rejects a job that is not failed | Active or completed jobs cannot enter failed-job recovery. |
-| `outreach-job-reconcile-and-requeue-rejects-prospect-state.test.ts` | Outreach reconciliation requeue: rejects a prospect that is not awaiting reconciliation | Recovery requires the matching prospect reconciliation state. |
-| `outreach-job-reconcile-and-requeue-rejects-review-status.test.ts` | Outreach reconciliation requeue: rejects a draft that is no longer approved | Recovery cannot bypass human approval. |
-| `outreach-job-reconcile-and-requeue-rejects-sent-at.test.ts` | Outreach reconciliation requeue: rejects confirmed sent timestamp evidence | A recorded send timestamp blocks requeue. |
-| `outreach-job-reconcile-and-requeue.test.ts` | Outreach reconciliation requeue: atomically restores a confirmed-not-sent job | Human-confirmed non-send restores all three durable records together. |
+| Test file                                                              | Test                                                                                    | What it protects                                                           |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `outreach-job-reconcile-and-requeue-missing-job.test.ts`               | Outreach reconciliation requeue: rejects a missing job                                  | Recovery cannot invent or mutate a missing job.                            |
+| `outreach-job-reconcile-and-requeue-rejection-preserves-state.test.ts` | Outreach reconciliation requeue: rejected recovery preserves all state                  | A rejected recovery attempt leaves the job, draft, and prospect unchanged. |
+| `outreach-job-reconcile-and-requeue-rejects-draft-state.test.ts`       | Outreach reconciliation requeue: rejects a draft that is not awaiting reconciliation    | Only reconciliation-state drafts enter atomic recovery.                    |
+| `outreach-job-reconcile-and-requeue-rejects-message-id.test.ts`        | Outreach reconciliation requeue: rejects confirmed sent message evidence                | A recorded Gmail message ID blocks requeue.                                |
+| `outreach-job-reconcile-and-requeue-rejects-nonfailed.test.ts`         | Outreach reconciliation requeue: rejects a job that is not failed                       | Active or completed jobs cannot enter failed-job recovery.                 |
+| `outreach-job-reconcile-and-requeue-rejects-prospect-state.test.ts`    | Outreach reconciliation requeue: rejects a prospect that is not awaiting reconciliation | Recovery requires the matching prospect reconciliation state.              |
+| `outreach-job-reconcile-and-requeue-rejects-review-status.test.ts`     | Outreach reconciliation requeue: rejects a draft that is no longer approved             | Recovery cannot bypass human approval.                                     |
+| `outreach-job-reconcile-and-requeue-rejects-sent-at.test.ts`           | Outreach reconciliation requeue: rejects confirmed sent timestamp evidence              | A recorded send timestamp blocks requeue.                                  |
+| `outreach-job-reconcile-and-requeue.test.ts`                           | Outreach reconciliation requeue: atomically restores a confirmed-not-sent job           | Human-confirmed non-send restores all three durable records together.      |
 
 ## G. Outreach Review and Queue Tests
 
-| Test file | Test | What it protects |
-| --- | --- | --- |
-| `outreach-review-approve-already-approved.test.ts` | Outreach review approval: rejects an already approved draft | Approval cannot be repeated. |
-| `outreach-review-approve-missing-draft.test.ts` | Outreach review approval: rejects a missing draft | Approval fails closed for an unknown draft. |
-| `outreach-review-approve-nonpending-draft.test.ts` | Outreach review approval: rejects a draft that is not pending | Approval cannot modify a reconciliation or sent draft. |
-| `outreach-review-approve-wrong-prospect.test.ts` | Outreach review approval: rejects a draft belonging to another prospect | Approval requires the exact prospect/draft relationship. |
-| `outreach-review-approve.test.ts` | Outreach review approval: changes needs_review to approved | The intended guarded approval transition succeeds. |
-| `outreach-review-by-prospect.test.ts` | Outreach review: returns the prospect and outreach draft | Review exposes the relevant prospect and draft together. |
-| `outreach-review-latest-draft.test.ts` | Outreach review: returns the latest outreach draft | Review selects the newest outreach draft for the prospect. |
-| `outreach-review-missing-prospect.test.ts` | Outreach review: returns null when the prospect does not exist | Missing prospects are handled without mutation. |
-| `outreach-review-no-draft.test.ts` | Outreach review: returns the prospect with no draft | A valid prospect remains reviewable before drafting. |
-| `outreach-review-queue-approved.test.ts` | Outreach review queue: creates a pending job for an approved draft | An eligible approved draft enters the durable queue. |
-| `outreach-review-queue-concurrent.test.ts` | Outreach review queue: allows only one concurrent queue attempt | Concurrent operators cannot create duplicate jobs. |
-| `outreach-review-queue-duplicate.test.ts` | Outreach review queue: rejects duplicate queueing without creating another job | Sequential duplicate queue attempts are idempotently rejected. |
-| `outreach-review-queue-invalid-stage.test.ts` | Outreach review queue: rejects a prospect that is not draft ready | Only `draft_ready` prospects can be queued. |
-| `outreach-review-queue-nonpending.test.ts` | Outreach review queue: rejects a draft that is not pending | Reconciliation or sent drafts cannot be queued. |
-| `outreach-review-queue-unapproved.test.ts` | Outreach review queue: rejects an unapproved draft | Human approval remains mandatory before queueing. |
-| `outreach-review-queue-wrong-prospect.test.ts` | Outreach review queue: rejects a draft belonging to another prospect | Queueing requires the exact prospect/draft relationship. |
+| Test file                                          | Test                                                                           | What it protects                                               |
+| -------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| `outreach-review-approve-already-approved.test.ts` | Outreach review approval: rejects an already approved draft                    | Approval cannot be repeated.                                   |
+| `outreach-review-approve-missing-draft.test.ts`    | Outreach review approval: rejects a missing draft                              | Approval fails closed for an unknown draft.                    |
+| `outreach-review-approve-nonpending-draft.test.ts` | Outreach review approval: rejects a draft that is not pending                  | Approval cannot modify a reconciliation or sent draft.         |
+| `outreach-review-approve-wrong-prospect.test.ts`   | Outreach review approval: rejects a draft belonging to another prospect        | Approval requires the exact prospect/draft relationship.       |
+| `outreach-review-approve.test.ts`                  | Outreach review approval: changes needs_review to approved                     | The intended guarded approval transition succeeds.             |
+| `outreach-review-by-prospect.test.ts`              | Outreach review: returns the prospect and outreach draft                       | Review exposes the relevant prospect and draft together.       |
+| `outreach-review-latest-draft.test.ts`             | Outreach review: returns the latest outreach draft                             | Review selects the newest outreach draft for the prospect.     |
+| `outreach-review-missing-prospect.test.ts`         | Outreach review: returns null when the prospect does not exist                 | Missing prospects are handled without mutation.                |
+| `outreach-review-no-draft.test.ts`                 | Outreach review: returns the prospect with no draft                            | A valid prospect remains reviewable before drafting.           |
+| `outreach-review-queue-approved.test.ts`           | Outreach review queue: creates a pending job for an approved draft             | An eligible approved draft enters the durable queue.           |
+| `outreach-review-queue-concurrent.test.ts`         | Outreach review queue: allows only one concurrent queue attempt                | Concurrent operators cannot create duplicate jobs.             |
+| `outreach-review-queue-duplicate.test.ts`          | Outreach review queue: rejects duplicate queueing without creating another job | Sequential duplicate queue attempts are idempotently rejected. |
+| `outreach-review-queue-invalid-stage.test.ts`      | Outreach review queue: rejects a prospect that is not draft ready              | Only `draft_ready` prospects can be queued.                    |
+| `outreach-review-queue-nonpending.test.ts`         | Outreach review queue: rejects a draft that is not pending                     | Reconciliation or sent drafts cannot be queued.                |
+| `outreach-review-queue-unapproved.test.ts`         | Outreach review queue: rejects an unapproved draft                             | Human approval remains mandatory before queueing.              |
+| `outreach-review-queue-wrong-prospect.test.ts`     | Outreach review queue: rejects a draft belonging to another prospect           | Queueing requires the exact prospect/draft relationship.       |
 
 ## H. Operator CLI Tests
 
-| Test file | Test | What it protects |
-| --- | --- | --- |
-| `outreach-operator-inspect-job.test.ts` | Outreach operator inspect: returns the exact joined outreach job | Single-job inspection returns joined job, draft, and prospect state. |
-| `outreach-operator-inspect-missing-job.test.ts` | Outreach operator inspect: returns null when job does not exist | Missing job inspection is explicit. |
-| `outreach-operator-inspect-queue-excludes-completed.test.ts` | Outreach operator inspect: excludes completed jobs from the default queue | Completed work stays out of the operational queue view. |
-| `outreach-operator-inspect-queue.test.ts` | Outreach operator inspect: includes a non-completed outreach job | Pending operational work appears in the queue view. |
-| `outreach-operator-inspect-rejects-extra-arguments.test.ts` | Outreach operator args: rejects extra inspect arguments | Inspect cannot silently ignore unexpected input. |
-| `outreach-operator-inspect-rejects-invalid-job-id.test.ts` | Outreach operator args: rejects an invalid inspect job ID | Inspect requires a UUID job identity. |
-| `outreach-operator-parse-approve-invalid-draft.test.ts` | Outreach operator args: rejects approval with an invalid draft ID | Approval requires a UUID draft identity. |
-| `outreach-operator-parse-approve-requires-confirmation.test.ts` | Outreach operator args: rejects approval without confirmation | Approval cannot execute without explicit confirmation. |
-| `outreach-operator-parse-approve.test.ts` | Outreach operator args: parses confirmed approval command | The guarded approval syntax is accepted. |
-| `outreach-operator-parse-inspect-job.test.ts` | Outreach operator args: parses inspect command with job ID | Exact-job inspection syntax is accepted. |
-| `outreach-operator-parse-inspect-missing-job-value.test.ts` | Outreach operator args: rejects inspect when job ID is another option | An option token cannot be mistaken for a job ID. |
-| `outreach-operator-parse-inspect-missing-job.test.ts` | Outreach operator args: rejects inspect without a job ID | `--job` requires a value. |
-| `outreach-operator-parse-inspect-unknown-flag.test.ts` | Outreach operator args: rejects unknown inspect flag | Inspect fails closed on unknown options. |
-| `outreach-operator-parse-inspect.test.ts` | Outreach operator args: parses inspect command | Default queue inspection syntax is accepted. |
-| `outreach-operator-parse-queue-requires-confirmation.test.ts` | Outreach operator args: rejects queueing without confirmation | Queue mutation requires explicit confirmation. |
-| `outreach-operator-parse-queue.test.ts` | Outreach operator args: parses confirmed queue command | The guarded queue syntax is accepted. |
-| `outreach-operator-parse-review-invalid-prospect.test.ts` | Outreach operator args: rejects review with an invalid prospect ID | Review requires a UUID prospect identity. |
-| `outreach-operator-parse-review.test.ts` | Outreach operator args: parses review command | Read-only review syntax is accepted. |
-| `outreach-operator-reconcile-missing-job-id.test.ts` | Outreach operator args: rejects reconciliation without a job ID | Reconciliation requires an explicit job identity. |
-| `outreach-operator-reconcile-rejects-extra-arguments.test.ts` | Outreach operator args: rejects extra reconciliation arguments | Reconciliation cannot silently ignore unexpected input. |
-| `outreach-operator-reconcile-rejects-invalid-job-id.test.ts` | Outreach operator args: rejects an invalid reconciliation job ID | Reconciliation requires a UUID job identity. |
-| `outreach-operator-reconcile-requires-confirmation.test.ts` | Outreach operator args: rejects reconciliation without confirmation | Confirmed non-send is mandatory. |
-| `outreach-operator-reconcile-requires-job.test.ts` | Outreach operator args: rejects reconciliation without job option | Reconciliation requires the `--job` option. |
-| `outreach-operator-reconcile-valid.test.ts` | Outreach operator args: parses confirmed reconciliation command | The guarded recovery syntax is accepted. |
-| `outreach-operator-run-approve-rejected.test.ts` | Outreach operator runner: rejects an unsuccessful draft approval | Domain approval rejection becomes a visible CLI failure. |
-| `outreach-operator-run-approve.test.ts` | Outreach operator runner: executes confirmed draft approval | Confirmed approval reaches the guarded domain action. |
-| `outreach-operator-run-inspect-job.test.ts` | Outreach operator runner: inspects the requested job | The runner passes the exact job identity to inspection. |
-| `outreach-operator-run-inspect-missing-job.test.ts` | Outreach operator runner: rejects a missing requested job | Missing requested jobs produce an error. |
-| `outreach-operator-run-inspect-queue.test.ts` | Outreach operator runner: inspects the default queue | Default inspection reaches the queue read model. |
-| `outreach-operator-run-queue-rejected.test.ts` | Outreach operator runner: rejects unsuccessful draft queueing | Domain queue rejection becomes a visible CLI failure. |
-| `outreach-operator-run-queue.test.ts` | Outreach operator runner: executes confirmed draft queueing | Confirmed queueing reaches the guarded domain action. |
-| `outreach-operator-run-reconcile-not-sent.test.ts` | Outreach operator runner: executes confirmed not-sent reconciliation | Confirmed recovery reaches the atomic reconciliation action. |
-| `outreach-operator-run-reconcile-rejected.test.ts` | Outreach operator runner: rejects an unsuccessful reconciliation | Domain recovery rejection becomes a visible CLI failure. |
-| `outreach-operator-run-reconciliation-blocked.test.ts` | Outreach operator runner: blocks reconciliation execution until implemented | Missing mutation wiring fails closed. |
-| `outreach-operator-run-review-missing.test.ts` | Outreach operator runner: rejects a missing prospect review | Missing prospects produce an error. |
-| `outreach-operator-run-review.test.ts` | Outreach operator runner: returns a prospect review | Review reaches the read model and returns its result. |
-| `outreach-operator-unknown-command.test.ts` | Outreach operator args: rejects unknown command | Unknown operator actions fail closed. |
+| Test file                                                       | Test                                                                        | What it protects                                                     |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `outreach-operator-inspect-job.test.ts`                         | Outreach operator inspect: returns the exact joined outreach job            | Single-job inspection returns joined job, draft, and prospect state. |
+| `outreach-operator-inspect-missing-job.test.ts`                 | Outreach operator inspect: returns null when job does not exist             | Missing job inspection is explicit.                                  |
+| `outreach-operator-inspect-queue-excludes-completed.test.ts`    | Outreach operator inspect: excludes completed jobs from the default queue   | Completed work stays out of the operational queue view.              |
+| `outreach-operator-inspect-queue.test.ts`                       | Outreach operator inspect: includes a non-completed outreach job            | Pending operational work appears in the queue view.                  |
+| `outreach-operator-inspect-rejects-extra-arguments.test.ts`     | Outreach operator args: rejects extra inspect arguments                     | Inspect cannot silently ignore unexpected input.                     |
+| `outreach-operator-inspect-rejects-invalid-job-id.test.ts`      | Outreach operator args: rejects an invalid inspect job ID                   | Inspect requires a UUID job identity.                                |
+| `outreach-operator-parse-approve-invalid-draft.test.ts`         | Outreach operator args: rejects approval with an invalid draft ID           | Approval requires a UUID draft identity.                             |
+| `outreach-operator-parse-approve-requires-confirmation.test.ts` | Outreach operator args: rejects approval without confirmation               | Approval cannot execute without explicit confirmation.               |
+| `outreach-operator-parse-approve.test.ts`                       | Outreach operator args: parses confirmed approval command                   | The guarded approval syntax is accepted.                             |
+| `outreach-operator-parse-inspect-job.test.ts`                   | Outreach operator args: parses inspect command with job ID                  | Exact-job inspection syntax is accepted.                             |
+| `outreach-operator-parse-inspect-missing-job-value.test.ts`     | Outreach operator args: rejects inspect when job ID is another option       | An option token cannot be mistaken for a job ID.                     |
+| `outreach-operator-parse-inspect-missing-job.test.ts`           | Outreach operator args: rejects inspect without a job ID                    | `--job` requires a value.                                            |
+| `outreach-operator-parse-inspect-unknown-flag.test.ts`          | Outreach operator args: rejects unknown inspect flag                        | Inspect fails closed on unknown options.                             |
+| `outreach-operator-parse-inspect.test.ts`                       | Outreach operator args: parses inspect command                              | Default queue inspection syntax is accepted.                         |
+| `outreach-operator-parse-queue-requires-confirmation.test.ts`   | Outreach operator args: rejects queueing without confirmation               | Queue mutation requires explicit confirmation.                       |
+| `outreach-operator-parse-queue.test.ts`                         | Outreach operator args: parses confirmed queue command                      | The guarded queue syntax is accepted.                                |
+| `outreach-operator-parse-review-invalid-prospect.test.ts`       | Outreach operator args: rejects review with an invalid prospect ID          | Review requires a UUID prospect identity.                            |
+| `outreach-operator-parse-review.test.ts`                        | Outreach operator args: parses review command                               | Read-only review syntax is accepted.                                 |
+| `outreach-operator-reconcile-missing-job-id.test.ts`            | Outreach operator args: rejects reconciliation without a job ID             | Reconciliation requires an explicit job identity.                    |
+| `outreach-operator-reconcile-rejects-extra-arguments.test.ts`   | Outreach operator args: rejects extra reconciliation arguments              | Reconciliation cannot silently ignore unexpected input.              |
+| `outreach-operator-reconcile-rejects-invalid-job-id.test.ts`    | Outreach operator args: rejects an invalid reconciliation job ID            | Reconciliation requires a UUID job identity.                         |
+| `outreach-operator-reconcile-requires-confirmation.test.ts`     | Outreach operator args: rejects reconciliation without confirmation         | Confirmed non-send is mandatory.                                     |
+| `outreach-operator-reconcile-requires-job.test.ts`              | Outreach operator args: rejects reconciliation without job option           | Reconciliation requires the `--job` option.                          |
+| `outreach-operator-reconcile-valid.test.ts`                     | Outreach operator args: parses confirmed reconciliation command             | The guarded recovery syntax is accepted.                             |
+| `outreach-operator-run-approve-rejected.test.ts`                | Outreach operator runner: rejects an unsuccessful draft approval            | Domain approval rejection becomes a visible CLI failure.             |
+| `outreach-operator-run-approve.test.ts`                         | Outreach operator runner: executes confirmed draft approval                 | Confirmed approval reaches the guarded domain action.                |
+| `outreach-operator-run-inspect-job.test.ts`                     | Outreach operator runner: inspects the requested job                        | The runner passes the exact job identity to inspection.              |
+| `outreach-operator-run-inspect-missing-job.test.ts`             | Outreach operator runner: rejects a missing requested job                   | Missing requested jobs produce an error.                             |
+| `outreach-operator-run-inspect-queue.test.ts`                   | Outreach operator runner: inspects the default queue                        | Default inspection reaches the queue read model.                     |
+| `outreach-operator-run-queue-rejected.test.ts`                  | Outreach operator runner: rejects unsuccessful draft queueing               | Domain queue rejection becomes a visible CLI failure.                |
+| `outreach-operator-run-queue.test.ts`                           | Outreach operator runner: executes confirmed draft queueing                 | Confirmed queueing reaches the guarded domain action.                |
+| `outreach-operator-run-reconcile-not-sent.test.ts`              | Outreach operator runner: executes confirmed not-sent reconciliation        | Confirmed recovery reaches the atomic reconciliation action.         |
+| `outreach-operator-run-reconcile-rejected.test.ts`              | Outreach operator runner: rejects an unsuccessful reconciliation            | Domain recovery rejection becomes a visible CLI failure.             |
+| `outreach-operator-run-reconciliation-blocked.test.ts`          | Outreach operator runner: blocks reconciliation execution until implemented | Missing mutation wiring fails closed.                                |
+| `outreach-operator-run-review-missing.test.ts`                  | Outreach operator runner: rejects a missing prospect review                 | Missing prospects produce an error.                                  |
+| `outreach-operator-run-review.test.ts`                          | Outreach operator runner: returns a prospect review                         | Review reaches the read model and returns its result.                |
+| `outreach-operator-unknown-command.test.ts`                     | Outreach operator args: rejects unknown command                             | Unknown operator actions fail closed.                                |
 
 ## I. Operational Monitoring Tests
 
-| Test file | Test | What it protects |
-| --- | --- | --- |
-| `outreach-monitor-attention.test.ts` | Outreach monitor: exits two when attention is required | Schedulers can distinguish an operational alert from success or monitor failure. |
-| `outreach-monitor-healthy.test.ts` | Outreach monitor: emits JSON and exits zero when healthy | A healthy status produces the documented JSON contract and success exit code. |
-| `outreach-monitor-invalid-threshold.test.ts` | Outreach monitor: rejects invalid threshold configuration before querying | Invalid configuration fails closed without touching the database. |
-| `outreach-monitor-query-error.test.ts` | Outreach monitor: propagates status-query failures to the CLI error boundary | Database failures reach the command boundary and become monitor errors. |
-| `outreach-monitor-thresholds.test.ts` | Outreach monitor: passes configured thresholds to the status query | Environment overrides reach the operational query exactly. |
-| `outreach-operations-delayed-job.test.ts` | Outreach operations: does not alert on a delayed pending job | A future retry is visible without being mislabeled as overdue work. |
-| `outreach-operations-failed-job.test.ts` | Outreach operations: alerts on a failed job | Terminal failures produce a machine-detectable operator alert. |
-| `outreach-operations-invalid-threshold.test.ts` | Outreach operations: rejects an invalid monitoring threshold | Monitoring fails closed on nonsensical threshold configuration. |
-| `outreach-operations-overdue-ready-job.test.ts` | Outreach operations: alerts on an overdue ready job | Ready work that is not being claimed becomes visible. |
-| `outreach-operations-reconciliation.test.ts` | Outreach operations: alerts on reconciliation state | Uncertain Gmail outcomes remain visible until a human resolves them. |
-| `outreach-operations-stale-job.test.ts` | Outreach operations: alerts on a stale processing job | Abandoned processing work produces an operator alert. |
-| `outreach-operations-status.test.ts` | Outreach operations: returns a consistent operational snapshot | Aggregate counts remain internally consistent without exposing message content. |
+| Test file                                       | Test                                                                         | What it protects                                                                 |
+| ----------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `outreach-monitor-attention.test.ts`            | Outreach monitor: exits two when attention is required                       | Schedulers can distinguish an operational alert from success or monitor failure. |
+| `outreach-monitor-healthy.test.ts`              | Outreach monitor: emits JSON and exits zero when healthy                     | A healthy status produces the documented JSON contract and success exit code.    |
+| `outreach-monitor-invalid-threshold.test.ts`    | Outreach monitor: rejects invalid threshold configuration before querying    | Invalid configuration fails closed without touching the database.                |
+| `outreach-monitor-query-error.test.ts`          | Outreach monitor: propagates status-query failures to the CLI error boundary | Database failures reach the command boundary and become monitor errors.          |
+| `outreach-monitor-thresholds.test.ts`           | Outreach monitor: passes configured thresholds to the status query           | Environment overrides reach the operational query exactly.                       |
+| `outreach-operations-delayed-job.test.ts`       | Outreach operations: does not alert on a delayed pending job                 | A future retry is visible without being mislabeled as overdue work.              |
+| `outreach-operations-failed-job.test.ts`        | Outreach operations: alerts on a failed job                                  | Terminal failures produce a machine-detectable operator alert.                   |
+| `outreach-operations-invalid-threshold.test.ts` | Outreach operations: rejects an invalid monitoring threshold                 | Monitoring fails closed on nonsensical threshold configuration.                  |
+| `outreach-operations-overdue-ready-job.test.ts` | Outreach operations: alerts on an overdue ready job                          | Ready work that is not being claimed becomes visible.                            |
+| `outreach-operations-reconciliation.test.ts`    | Outreach operations: alerts on reconciliation state                          | Uncertain Gmail outcomes remain visible until a human resolves them.             |
+| `outreach-operations-stale-job.test.ts`         | Outreach operations: alerts on a stale processing job                        | Abandoned processing work produces an operator alert.                            |
+| `outreach-operations-status.test.ts`            | Outreach operations: returns a consistent operational snapshot               | Aggregate counts remain internally consistent without exposing message content.  |
 
 ---
 
@@ -1057,13 +1057,13 @@ stop the job and set the draft to `needs_edit` / `pending`; failures after send
 invocation retain the existing reconciliation behavior. HTML/multipart content
 and attachments currently block review rather than passing a text-only check.
 
-| Test file | Coverage |
-| --- | --- |
-| `tests/gmail/gmail-draft-creator.test.ts` | Exact create request, disabled transport retries, incomplete results, uncertain errors |
-| `tests/outreach/outreach-draft-content.test.ts` | UTF-8 MIME round trip, header folding, injection and input rejection, explicit CLI confirmation |
-| `tests/outreach/outreach-draft-creation.test.ts` | Isolated-schema migration, reservation before Gmail, concurrent attempts, review-only success, uncertain results, contact edits, finalization failure, DB outage, existing/interrupted requests |
-| `tests/gmail/gmail-draft-preflight.test.ts` | MIME decoding, IDs/labels/thread, recipient/header injection, changed copy, unsupported formats, verified send snapshot, and send-failure classification |
-| `tests/jobs/process-outreach-job-preflight.test.ts` | Review block and terminal job state, approved-content handoff, preservation of confirmed-send evidence, and changed-state persistence rejection |
+| Test file                                           | Coverage                                                                                                                                                                                        |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/gmail/gmail-draft-creator.test.ts`           | Exact create request, disabled transport retries, incomplete results, uncertain errors                                                                                                          |
+| `tests/outreach/outreach-draft-content.test.ts`     | UTF-8 MIME round trip, header folding, injection and input rejection, explicit CLI confirmation                                                                                                 |
+| `tests/outreach/outreach-draft-creation.test.ts`    | Isolated-schema migration, reservation before Gmail, concurrent attempts, review-only success, uncertain results, contact edits, finalization failure, DB outage, existing/interrupted requests |
+| `tests/gmail/gmail-draft-preflight.test.ts`         | MIME decoding, IDs/labels/thread, recipient/header injection, changed copy, unsupported formats, verified send snapshot, and send-failure classification                                        |
+| `tests/jobs/process-outreach-job-preflight.test.ts` | Review block and terminal job state, approved-content handoff, preservation of confirmed-send evidence, and changed-state persistence rejection                                                 |
 
 ## Reply monitoring migration
 
@@ -1073,12 +1073,12 @@ and the limits of polling versus live follow-up preflight. This command reads
 Gmail and writes Postgres; it is not the read-only queue-health monitor.
 Production migration, Gmail acceptance, and scheduling remain pending.
 
-| Test file | Coverage |
-| --- | --- |
-| `tests/gmail/gmail-thread-reader.test.ts` | Full-thread read request, unavailable versus transient/auth errors, no mailbox mutation |
-| `tests/outreach/reply-monitor.test.ts` | Exact sent-message anchor, fast/same-millisecond replies, archived/automatic messages, malformed thread rejection |
+| Test file                                       | Coverage                                                                                                                                                           |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `tests/gmail/gmail-thread-reader.test.ts`       | Full-thread read request, unavailable versus transient/auth errors, no mailbox mutation                                                                            |
+| `tests/outreach/reply-monitor.test.ts`          | Exact sent-message anchor, fast/same-millisecond replies, archived/automatic messages, malformed thread rejection                                                  |
 | `tests/outreach/reply-monitor-database.test.ts` | Disposable-schema migrations, idempotent/concurrent polling, persistent unavailable state, retries, bounded polling, stale-read rollback, preserved reconciliation |
-| `tests/outreach/reply-outreach-guards.test.ts` | Reply evidence and persistent suppression block queue/claim, unhealthy checks block sends, late finalization preserves replies |
+| `tests/outreach/reply-outreach-guards.test.ts`  | Reply evidence and persistent suppression block queue/claim, unhealthy checks block sends, late finalization preserves replies                                     |
 
 ## Reply classification and response drafting
 
@@ -1089,14 +1089,14 @@ The command may create a Gmail response draft but never approves, queues, or
 sends it. Live acceptance and a managed response approval/send pipeline remain
 pending. Existing outreach commands do not accept response drafts.
 
-| Test file | Coverage |
-| --- | --- |
-| `tests/gmail/gmail-message-reader.test.ts` | Exact raw message reads and explicit-thread draft creation without retries |
-| `tests/outreach/reply-classification.test.ts` | Same object/string validation, required fields, enums, limits, safe no-draft/action decisions |
-| `tests/outreach/reply-context.test.ts` | Full-body MIME extraction, sender/routing checks, exact parent headers, preserved plain signature, opt-out/automatic flags, no attachment/snippet fallback |
-| `tests/outreach/openai-reply-classifier.test.ts` | Strict request schema, isolated untrusted input, no tools, disabled response storage, timeout, refused/incomplete/invalid output and transport failures |
-| `tests/outreach/process-reply.test.ts` | Disposable-schema journal migrations, concurrency/duplicates, opt-outs/OOO, stale state, uncertain creation, changed contacts, DB outage/conflict/lost acknowledgement, revoked stale approval |
-| `tests/outreach/reply-process-cli.test.ts` | Missing intent, malformed IDs, and unexpected arguments reject before provider/database use |
+| Test file                                        | Coverage                                                                                                                                                                                       |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/gmail/gmail-message-reader.test.ts`       | Exact raw message reads and explicit-thread draft creation without retries                                                                                                                     |
+| `tests/outreach/reply-classification.test.ts`    | Same object/string validation, required fields, enums, limits, safe no-draft/action decisions                                                                                                  |
+| `tests/outreach/reply-context.test.ts`           | Full-body MIME extraction, sender/routing checks, exact parent headers, preserved plain signature, opt-out/automatic flags, no attachment/snippet fallback                                     |
+| `tests/outreach/openai-reply-classifier.test.ts` | Strict request schema, isolated untrusted input, no tools, disabled response storage, timeout, refused/incomplete/invalid output and transport failures                                        |
+| `tests/outreach/process-reply.test.ts`           | Disposable-schema journal migrations, concurrency/duplicates, opt-outs/OOO, stale state, uncertain creation, changed contacts, DB outage/conflict/lost acknowledgement, revoked stale approval |
+| `tests/outreach/reply-process-cli.test.ts`       | Missing intent, malformed IDs, and unexpected arguments reject before provider/database use                                                                                                    |
 
 Database-backed tests require `RELAY_TEST_DATABASE_DISPOSABLE=true` and **both**
 `DATABASE_URL` and `RELAY_DRAFT_TEST_DATABASE_URL` to target a loopback
@@ -1124,13 +1124,13 @@ The separate `follow-up` command offers plan, draft, approve and guarded send;
 the existing initial-outreach worker is not expanded to process follow-ups.
 No live flag, scheduler, deployment, or Gmail operation was enabled by this work.
 
-| Test file | Coverage |
-| --- | --- |
-| `tests/outreach/follow-up-calendar.test.ts` | Local midnight eligibility, spring/fall DST, four-/five-day spacing, cap, leap days and invalid input |
-| `tests/operator/follow-up-input.test.ts` | Exact confirmation flags, UUID/zone parsing, disabled live-send gate before provider/DB use |
-| `tests/gmail/follow-up-preflight.test.ts` | Exact parent identity, required/duplicate/changed In-Reply-To and References headers |
-| `tests/outreach/follow-up-boundaries.test.ts` | Initial-outreach tools reject follow-up approval/queue/claim/reconciliation |
-| `tests/outreach/follow-up-pipeline.test.ts` | Disposable-schema migration, preserved templates/signature, two-touch scheduling, concurrent reservations, approval fingerprint, newer replies, MIME snapshots, uncertainty, database outages, lost acknowledgement and stale approval |
+| Test file                                     | Coverage                                                                                                                                                                                                                               |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/outreach/follow-up-calendar.test.ts`   | Local midnight eligibility, spring/fall DST, four-/five-day spacing, cap, leap days and invalid input                                                                                                                                  |
+| `tests/operator/follow-up-input.test.ts`      | Exact confirmation flags, UUID/zone parsing, disabled live-send gate before provider/DB use                                                                                                                                            |
+| `tests/gmail/follow-up-preflight.test.ts`     | Exact parent identity, required/duplicate/changed In-Reply-To and References headers                                                                                                                                                   |
+| `tests/outreach/follow-up-boundaries.test.ts` | Initial-outreach tools reject follow-up approval/queue/claim/reconciliation                                                                                                                                                            |
+| `tests/outreach/follow-up-pipeline.test.ts`   | Disposable-schema migration, preserved templates/signature, two-touch scheduling, concurrent reservations, approval fingerprint, newer replies, MIME snapshots, uncertainty, database outages, lost acknowledgement and stale approval |
 
 ## Prospect intake migration
 
@@ -1143,16 +1143,16 @@ website, only the request ID provides idempotency, so a different request ID is
 treated as a distinct intake. Reusing a request ID with different input, or
 reusing a non-null website identity with different input, fails closed.
 
-| Test | What it protects |
-| --- | --- |
-| `tests/intake/prospect-intake-input.test.ts` | Strict normalized input, explicit CLI confirmation, rejection of unsafe URLs, invalid email, and unknown fields, and JSON parse errors that do not echo intake input |
-| `tests/intake/prospect-intake.test.ts` | Migration 012, atomic prospect/journal creation, authoritative duplicate request ID, concurrent convergence, and request-ID/identity conflict rejection |
-| `tests/intake/prospect-intake-conflict.test.ts` | Typed conflict errors for request-ID, identity, and legacy-site conflicts with rollback and no insert, and database failures not reported as conflicts |
-| `tests/web/intake-server.test.ts` | Operator intake UI: server-generated request ID, review before creation, explicit confirmation, validation, conflict, and unknown-outcome pages without leaked input or internal errors, HTML escaping, loopback Host/Origin enforcement, body-size and form limits, and loopback-only binding. Start Research: offered only for a researchable prospect still awaiting research, never started by prospect creation, explicit confirmation, launched once in the background, never started when a research request exists or its state cannot be read, status pages for running, completed, and needs-review states, and the same Host/Origin and strict-form protections |
-| `tests/web/intake-pages.test.ts` | HTML escaping and a content security policy that allows only the inline stylesheet |
-| `tests/web/intake-research.test.ts` | Intake-initiated research calls the existing workflow with `gmailDraftAllowed: false` and a Gmail draft creator that always throws, builds no provider client for a status read, and lets shutdown wait for running research |
-| `tests/web/intake-ui-boundary.test.ts` | The intake UI process imports only intake, page, database, and research modules: no Gmail runtime, sender, job, or worker code |
-| `tests/data/canonical-data-foundation.test.ts` | Migration 014, research document/chunk persistence, prospect and source-URL relational constraints, null-only embeddings until a dimension is selected, and inbound/outbound communication persistence |
+| Test                                            | What it protects                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/intake/prospect-intake-input.test.ts`    | Strict normalized input, explicit CLI confirmation, rejection of unsafe URLs, invalid email, and unknown fields, and JSON parse errors that do not echo intake input                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `tests/intake/prospect-intake.test.ts`          | Migration 012, atomic prospect/journal creation, authoritative duplicate request ID, concurrent convergence, and request-ID/identity conflict rejection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `tests/intake/prospect-intake-conflict.test.ts` | Typed conflict errors for request-ID, identity, and legacy-site conflicts with rollback and no insert, and database failures not reported as conflicts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `tests/web/intake-server.test.ts`               | Operator intake UI: server-generated request ID, review before creation, explicit confirmation, validation, conflict, and unknown-outcome pages without leaked input or internal errors, HTML escaping, loopback Host/Origin enforcement, body-size and form limits, and loopback-only binding. Start Research: offered only for a researchable prospect still awaiting research, never started by prospect creation, explicit confirmation, launched once in the background, never started when a research request exists or its state cannot be read, status pages for running, completed, and needs-review states, and the same Host/Origin and strict-form protections |
+| `tests/web/intake-pages.test.ts`                | HTML escaping and a content security policy that allows only the inline stylesheet                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `tests/web/intake-research.test.ts`             | Intake-initiated research calls the existing workflow with `gmailDraftAllowed: false` and a Gmail draft creator that always throws, builds no provider client for a status read, and lets shutdown wait for running research                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `tests/web/intake-ui-boundary.test.ts`          | The intake UI process imports only intake, page, database, and research modules: no Gmail runtime, sender, job, or worker code                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `tests/data/canonical-data-foundation.test.ts`  | Migration 014, research document/chunk persistence, prospect and source-URL relational constraints, null-only embeddings until a dimension is selected, and inbound/outbound communication persistence                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 The database-backed intake test uses fake/local inputs and a unique schema on
 the guarded disposable `relay_test` database. It does not call any external
@@ -1179,10 +1179,10 @@ separate approval. Each provider creation has a committed journal state;
 uncertain outcomes require reconciliation instead of automatic recreation. See
 `Relay_Migration_Plan.md` for setup, supported scope, and external acceptance.
 
-| Test | What it protects |
-| --- | --- |
+| Test                                       | What it protects                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tests/research/research-contract.test.ts` | Safe same-site link selection with apex/`www` treated as one site under the same HTTPS scheme, equivalent Firecrawl source and final URLs (apex/`www` and trailing slash) with rejection of non-string or mismatched final URLs, exact saved-page citations and public-email evidence, strict object/string validation, tool-free provider requests, distinct explicit confirmation for `start` and `start-safe`, and research status output that shows the stored Gmail-draft policy |
-| `tests/research/prospect-research.test.ts` | Migrations 011 and 013, conservative default for existing rows, normal/safe stored policy, review-only success, safe `research_review` without Gmail, missing-contact and C-fit holds, concurrent reservation, retained Drive IDs after failure, uncertain Gmail creation, duplicate blocking, and stored-policy preservation across resume/retry |
+| `tests/research/prospect-research.test.ts` | Migrations 011 and 013, conservative default for existing rows, normal/safe stored policy, review-only success, safe `research_review` without Gmail, missing-contact and C-fit holds, concurrent reservation, retained Drive IDs after failure, uncertain Gmail creation, duplicate blocking, and stored-policy preservation across resume/retry                                                                                                                                     |
 
 The integration test uses both guarded database URLs with a disposable local
 `relay_test` database and fake provider implementations. No live Firecrawl,

@@ -17,7 +17,12 @@ async function main(): Promise<void> {
   const { db } = await import("../src/db.js");
   // An idle client error must not crash the process; requests already fail closed on their own.
   db.on("error", (error) =>
-    log({ event: "database_pool_error", error: error.name, code: (error as { code?: unknown }).code }));
+    log({
+      event: "database_pool_error",
+      error: error.name,
+      code: (error as { code?: unknown }).code,
+    }),
+  );
 
   // Research runs only when an operator selects Start Research, and never creates a Gmail draft.
   const research = createIntakeResearch(db);
@@ -33,21 +38,32 @@ async function main(): Promise<void> {
     await db.end();
     throw error;
   }
-  console.log(`Relay intake UI listening on http://${INTAKE_UI_HOST}:${port}/ (loopback only).`);
-  console.log("Confirmed prospects are written to the database configured by DATABASE_URL. Press Ctrl+C to stop.");
-  console.log("Start Research calls Firecrawl, OpenAI, and Google Drive for that prospect; nothing calls them before then.");
+  console.log(
+    `Relay intake UI listening on http://${INTAKE_UI_HOST}:${port}/ (loopback only).`,
+  );
+  console.log(
+    "Confirmed prospects are written to the database configured by DATABASE_URL. Press Ctrl+C to stop.",
+  );
+  console.log(
+    "Start Research calls Firecrawl, OpenAI, and Google Drive for that prospect; nothing calls them before then.",
+  );
 
   // A second signal falls through to Node's default handler and exits immediately.
   let stopping = false;
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
-    console.log("Stopping Relay intake UI after in-flight requests and running research finish.");
+    console.log(
+      "Stopping Relay intake UI after in-flight requests and running research finish.",
+    );
     server.close(() => {
       // Closing the pool under running research would strand its request mid-checkpoint.
-      research.idle().then(() => db.end()).catch(() => {
-        process.exitCode = 1;
-      });
+      research
+        .idle()
+        .then(() => db.end())
+        .catch(() => {
+          process.exitCode = 1;
+        });
     });
   };
   process.once("SIGINT", stop);

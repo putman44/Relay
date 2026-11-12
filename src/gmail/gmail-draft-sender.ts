@@ -5,13 +5,16 @@ import type { GmailDraftSender } from "./gmail-types.js";
 export type GmailDraftApi = {
   users: {
     drafts: {
-      send: (request: {
-        userId: string;
-        requestBody: {
-          id: string;
-          message?: { raw: string; threadId: string };
-        };
-      }, options?: { retry: false }) => Promise<{
+      send: (
+        request: {
+          userId: string;
+          requestBody: {
+            id: string;
+            message?: { raw: string; threadId: string };
+          };
+        },
+        options?: { retry: false },
+      ) => Promise<{
         data: {
           id?: string | null;
           threadId?: string | null;

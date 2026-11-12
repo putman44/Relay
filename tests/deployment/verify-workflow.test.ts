@@ -1,17 +1,24 @@
-import { strict as assert } from 'node:assert';
-import { spawnSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { test } from 'node:test';
-import { assertVerificationDatabaseOwnership } from '../../scripts/verification-database-ownership.js';
+import { strict as assert } from "node:assert";
+import { spawnSync } from "node:child_process";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { assertVerificationDatabaseOwnership } from "../../scripts/verification-database-ownership.js";
 
-const repositoryRootUrl = new URL('../../', import.meta.url);
+const repositoryRootUrl = new URL("../../", import.meta.url);
 const repositoryRoot = fileURLToPath(repositoryRootUrl);
 
 async function readRepositoryFile(path: string) {
-  return readFile(new URL(path, repositoryRootUrl), 'utf8');
+  return readFile(new URL(path, repositoryRootUrl), "utf8");
 }
 
 type FakeVerification = {
@@ -27,27 +34,36 @@ async function writeExecutable(path: string, source: string) {
 }
 
 async function createFakeVerification(): Promise<FakeVerification> {
-  const directory = await mkdtemp(join(tmpdir(), 'relay-verify-test-'));
-  const binDirectory = join(directory, 'bin');
-  const logPath = join(directory, 'commands.log');
-  const statePath = join(directory, 'state.json');
-  const uuidCounterPath = join(directory, 'uuid-counter');
-  const hostileEnvPath = join(directory, 'hostile.env');
+  const directory = await mkdtemp(join(tmpdir(), "relay-verify-test-"));
+  const binDirectory = join(directory, "bin");
+  const logPath = join(directory, "commands.log");
+  const statePath = join(directory, "state.json");
+  const uuidCounterPath = join(directory, "uuid-counter");
+  const hostileEnvPath = join(directory, "hostile.env");
   await mkdir(binDirectory);
-  await writeFile(statePath, JSON.stringify({
-    container: false,
-    volume: false,
-    activeEndpoint: 'unix:///tmp/fake-docker.sock',
-    pinnedInfoSeen: false,
-    pinnedEndpointAvailable: true,
-  }));
-  await writeFile(hostileEnvPath,
-    'DATABASE_URL=postgresql://hostile@127.0.0.1:59999/relay_test\n' +
-    'RELAY_DRAFT_TEST_DATABASE_URL=postgresql://hostile@127.0.0.1:59999/relay_test\n');
+  await writeFile(
+    statePath,
+    JSON.stringify({
+      container: false,
+      volume: false,
+      activeEndpoint: "unix:///tmp/fake-docker.sock",
+      pinnedInfoSeen: false,
+      pinnedEndpointAvailable: true,
+    }),
+  );
+  await writeFile(
+    hostileEnvPath,
+    "DATABASE_URL=postgresql://hostile@127.0.0.1:59999/relay_test\n" +
+      "RELAY_DRAFT_TEST_DATABASE_URL=postgresql://hostile@127.0.0.1:59999/relay_test\n",
+  );
 
-  const dotenvConfig = JSON.stringify(join(repositoryRoot, 'node_modules/dotenv/dist/config.cjs'));
+  const dotenvConfig = JSON.stringify(
+    join(repositoryRoot, "node_modules/dotenv/dist/config.cjs"),
+  );
 
-  await writeExecutable(join(binDirectory, 'docker'), `#!${process.execPath}
+  await writeExecutable(
+    join(binDirectory, "docker"),
+    `#!${process.execPath}
 const { appendFileSync, readFileSync, writeFileSync } = require('node:fs');
 let args = process.argv.slice(2);
 const log = process.env.FAKE_VERIFY_LOG;
@@ -98,7 +114,8 @@ else if (args[0] === 'container' && args[1] === 'rm') {
   else fail('\\nError response from daemon: get ' + args.at(-1) + ': no such volume');
 } else fail('unexpected docker command: ' + args.join(' '), 97);
 }
-`);
+`,
+  );
 
   const guardedChildPrelude = `
 const { appendFileSync, readFileSync, writeFileSync } = require('node:fs');
@@ -118,7 +135,9 @@ const loadAndAssertGuardedEnvironment = () => {
 };
 `;
 
-  await writeExecutable(join(binDirectory, 'node'), `#!${process.execPath}
+  await writeExecutable(
+    join(binDirectory, "node"),
+    `#!${process.execPath}
 ${guardedChildPrelude}
 if (args[0] === '-e') {
   let count = 0;
@@ -136,9 +155,12 @@ appendFileSync(process.env.FAKE_VERIFY_LOG, JSON.stringify({ command: 'node', ar
 if (args.includes('scripts/check-verification-database.ts') && process.env.FAKE_OWNERSHIP_FAIL === 'true') {
   console.error('verification database ownership mismatch'); process.exit(41);
 }
-`);
+`,
+  );
 
-  await writeExecutable(join(binDirectory, 'npm'), `#!${process.execPath}
+  await writeExecutable(
+    join(binDirectory, "npm"),
+    `#!${process.execPath}
 ${guardedChildPrelude}
 loadAndAssertGuardedEnvironment();
 appendFileSync(process.env.FAKE_VERIFY_LOG, JSON.stringify({ command: 'npm', args,
@@ -146,44 +168,68 @@ appendFileSync(process.env.FAKE_VERIFY_LOG, JSON.stringify({ command: 'npm', arg
 if (process.env.FAKE_NPM_FAIL_COMMAND === args.join(' ')) {
   console.error('forced npm failure'); process.exit(Number(process.env.FAKE_NPM_EXIT || '42'));
 }
-`);
+`,
+  );
 
   return {
-    directory, logPath, statePath,
+    directory,
+    logPath,
+    statePath,
     run(overrides = {}) {
       const env: NodeJS.ProcessEnv = {
         ...process.env,
-        PATH: `${binDirectory}:${process.env.PATH ?? ''}`,
-        FAKE_VERIFY_LOG: logPath, FAKE_VERIFY_STATE: statePath,
+        PATH: `${binDirectory}:${process.env.PATH ?? ""}`,
+        FAKE_VERIFY_LOG: logPath,
+        FAKE_VERIFY_STATE: statePath,
         FAKE_UUID_COUNTER: uuidCounterPath,
-        DOTENV_PATH: hostileEnvPath, DOTENV_OVERRIDE: 'true',
-        DOTENV_CONFIG_PATH: hostileEnvPath, DOTENV_CONFIG_OVERRIDE: 'true',
+        DOTENV_PATH: hostileEnvPath,
+        DOTENV_OVERRIDE: "true",
+        DOTENV_CONFIG_PATH: hostileEnvPath,
+        DOTENV_CONFIG_OVERRIDE: "true",
         ...overrides,
       };
-      delete env.DOCKER_HOST; delete env.DOCKER_CONTEXT;
-      if (overrides.DOCKER_HOST !== undefined) env.DOCKER_HOST = overrides.DOCKER_HOST;
-      if (overrides.DOCKER_CONTEXT !== undefined) env.DOCKER_CONTEXT = overrides.DOCKER_CONTEXT;
-      return spawnSync('bash', ['scripts/verify.sh'], {
-        cwd: repositoryRoot, env, encoding: 'utf8', timeout: 15_000,
+      delete env.DOCKER_HOST;
+      delete env.DOCKER_CONTEXT;
+      if (overrides.DOCKER_HOST !== undefined)
+        env.DOCKER_HOST = overrides.DOCKER_HOST;
+      if (overrides.DOCKER_CONTEXT !== undefined)
+        env.DOCKER_CONTEXT = overrides.DOCKER_CONTEXT;
+      return spawnSync("bash", ["scripts/verify.sh"], {
+        cwd: repositoryRoot,
+        env,
+        encoding: "utf8",
+        timeout: 15_000,
       });
     },
   };
 }
 
 async function readFakeLog(fake: FakeVerification) {
-  try { return await readFile(fake.logPath, 'utf8'); } catch { return ''; }
+  try {
+    return await readFile(fake.logPath, "utf8");
+  } catch {
+    return "";
+  }
 }
 
 function dockerOperationLines(log: string) {
-  return log.split('\n').filter((line) => line.startsWith('docker ') &&
-    !line.startsWith('docker context '));
+  return log
+    .split("\n")
+    .filter(
+      (line) =>
+        line.startsWith("docker ") && !line.startsWith("docker context "),
+    );
 }
 
-test('repository verification retains its required static workflow boundaries', async () => {
+test("repository verification retains its required static workflow boundaries", async () => {
   const [packageJson, script] = await Promise.all([
-    readRepositoryFile('package.json'), readRepositoryFile('scripts/verify.sh'),
+    readRepositoryFile("package.json"),
+    readRepositoryFile("scripts/verify.sh"),
   ]);
-  assert.equal(JSON.parse(packageJson).scripts.verify, 'bash scripts/verify.sh');
+  assert.equal(
+    JSON.parse(packageJson).scripts.verify,
+    "bash scripts/verify.sh",
+  );
   assert.match(script, /pgvector\/pgvector:0\.8\.1-pg14/);
   assert.match(script, /--publish 127\.0\.0\.1::5432/);
   assert.match(script, /POSTGRES_DB=relay_test/);
@@ -194,81 +240,129 @@ test('repository verification retains its required static workflow boundaries', 
   assert.match(script, /npm test/);
 });
 
-for (const endpoint of ['ssh://builder.example.test', 'tcp://builder.example.test:2376']) {
+for (const endpoint of [
+  "ssh://builder.example.test",
+  "tcp://builder.example.test:2376",
+]) {
   test(`verification rejects the remote Docker endpoint ${endpoint} before creating resources`, async () => {
     const fake = await createFakeVerification();
     try {
       const result = fake.run({
-        DOCKER_CONTEXT: 'remote-builder',
-        DOCKER_HOST: 'unix:///tmp/misleading-local.sock',
+        DOCKER_CONTEXT: "remote-builder",
+        DOCKER_HOST: "unix:///tmp/misleading-local.sock",
         FAKE_DOCKER_ENDPOINT: endpoint,
       });
       assert.notEqual(result.status, 0);
       assert.match(`${result.stdout}\n${result.stderr}`, /local Unix socket/);
-      assert.doesNotMatch(await readFakeLog(fake), /docker (?:--host .* )?run /);
-    } finally { await rm(fake.directory, { recursive: true, force: true }); }
+      assert.doesNotMatch(
+        await readFakeLog(fake),
+        /docker (?:--host .* )?run /,
+      );
+    } finally {
+      await rm(fake.directory, { recursive: true, force: true });
+    }
   });
 }
 
-test('active context changes after validation cannot redirect setup or cleanup', async () => {
+test("active context changes after validation cannot redirect setup or cleanup", async () => {
   const fake = await createFakeVerification();
   try {
     const result = fake.run({
-      FAKE_CHANGE_ACTIVE_CONTEXT_AFTER_INFO: 'true',
-      FAKE_NPM_FAIL_COMMAND: 'run typecheck',
-      FAKE_NPM_EXIT: '42',
+      FAKE_CHANGE_ACTIVE_CONTEXT_AFTER_INFO: "true",
+      FAKE_NPM_FAIL_COMMAND: "run typecheck",
+      FAKE_NPM_EXIT: "42",
     });
     assert.equal(result.status, 42, `${result.stdout}\n${result.stderr}`);
     const operations = dockerOperationLines(await readFakeLog(fake));
     assert.ok(operations.length > 0);
-    assert.ok(operations.every((line) =>
-      line.startsWith('docker --host unix:///tmp/fake-docker.sock ')), operations.join('\n'));
-    assert.ok(operations.some((line) => line.includes(' container rm --force ')));
-    assert.ok(operations.some((line) => line.includes(' volume rm ')));
-    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')),
-      {
-        container: false,
-        volume: false,
-        activeEndpoint: 'ssh://changed.example.test',
-        pinnedInfoSeen: true,
-        pinnedEndpointAvailable: true,
-      });
-  } finally { await rm(fake.directory, { recursive: true, force: true }); }
+    assert.ok(
+      operations.every((line) =>
+        line.startsWith("docker --host unix:///tmp/fake-docker.sock "),
+      ),
+      operations.join("\n"),
+    );
+    assert.ok(
+      operations.some((line) => line.includes(" container rm --force ")),
+    );
+    assert.ok(operations.some((line) => line.includes(" volume rm ")));
+    assert.deepEqual(JSON.parse(await readFile(fake.statePath, "utf8")), {
+      container: false,
+      volume: false,
+      activeEndpoint: "ssh://changed.example.test",
+      pinnedInfoSeen: true,
+      pinnedEndpointAvailable: true,
+    });
+  } finally {
+    await rm(fake.directory, { recursive: true, force: true });
+  }
 });
 
-test('loss of the pinned Docker endpoint fails closed', async () => {
+test("loss of the pinned Docker endpoint fails closed", async () => {
   const fake = await createFakeVerification();
   try {
-    const result = fake.run({ FAKE_LOSE_PINNED_ENDPOINT_AFTER_INFO: 'true' });
+    const result = fake.run({ FAKE_LOSE_PINNED_ENDPOINT_AFTER_INFO: "true" });
     assert.notEqual(result.status, 0);
-    assert.match(`${result.stdout}\n${result.stderr}`, /pinned Docker endpoint is unavailable/);
+    assert.match(
+      `${result.stdout}\n${result.stderr}`,
+      /pinned Docker endpoint is unavailable/,
+    );
     const log = await readFakeLog(fake);
     assert.doesNotMatch(log, /migrations\//);
     assert.doesNotMatch(log, /"command":"npm"/);
-    assert.ok(dockerOperationLines(log).every((line) =>
-      line.startsWith('docker --host unix:///tmp/fake-docker.sock ')));
-  } finally { await rm(fake.directory, { recursive: true, force: true }); }
+    assert.ok(
+      dockerOperationLines(log).every((line) =>
+        line.startsWith("docker --host unix:///tmp/fake-docker.sock "),
+      ),
+    );
+  } finally {
+    await rm(fake.directory, { recursive: true, force: true });
+  }
 });
 
-test('database ownership requires the exact per-run role, database, and nonce', () => {
+test("database ownership requires the exact per-run role, database, and nonce", () => {
   const expected = {
-    database_user: 'relay_verify_run',
-    database_name: 'relay_test',
-    ownership_nonce: 'run-nonce',
+    database_user: "relay_verify_run",
+    database_name: "relay_test",
+    ownership_nonce: "run-nonce",
   };
-  assert.doesNotThrow(() => assertVerificationDatabaseOwnership(expected,
-    expected.database_user, expected.ownership_nonce));
-  assert.throws(() => assertVerificationDatabaseOwnership(
-    { ...expected, database_user: 'other_user' }, expected.database_user, expected.ownership_nonce));
-  assert.throws(() => assertVerificationDatabaseOwnership(
-    { ...expected, database_name: 'other_database' }, expected.database_user, expected.ownership_nonce));
-  assert.throws(() => assertVerificationDatabaseOwnership(
-    { ...expected, ownership_nonce: 'other_nonce' }, expected.database_user, expected.ownership_nonce));
-  assert.throws(() => assertVerificationDatabaseOwnership(undefined,
-    expected.database_user, expected.ownership_nonce));
+  assert.doesNotThrow(() =>
+    assertVerificationDatabaseOwnership(
+      expected,
+      expected.database_user,
+      expected.ownership_nonce,
+    ),
+  );
+  assert.throws(() =>
+    assertVerificationDatabaseOwnership(
+      { ...expected, database_user: "other_user" },
+      expected.database_user,
+      expected.ownership_nonce,
+    ),
+  );
+  assert.throws(() =>
+    assertVerificationDatabaseOwnership(
+      { ...expected, database_name: "other_database" },
+      expected.database_user,
+      expected.ownership_nonce,
+    ),
+  );
+  assert.throws(() =>
+    assertVerificationDatabaseOwnership(
+      { ...expected, ownership_nonce: "other_nonce" },
+      expected.database_user,
+      expected.ownership_nonce,
+    ),
+  );
+  assert.throws(() =>
+    assertVerificationDatabaseOwnership(
+      undefined,
+      expected.database_user,
+      expected.ownership_nonce,
+    ),
+  );
 });
 
-test('hostile dotenv settings cannot replace generated database URLs in verification children', async () => {
+test("hostile dotenv settings cannot replace generated database URLs in verification children", async () => {
   const fake = await createFakeVerification();
   try {
     const result = fake.run();
@@ -279,68 +373,114 @@ test('hostile dotenv settings cannot replace generated database URLs in verifica
     assert.match(log, /scripts\/check-verification-database\.ts/);
     assert.match(log, /migrations\/001_create_prospects\.sql/);
     assert.match(log, /"command":"npm","args":\["test"\]/);
-    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')).container, false);
-    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')).volume, false);
-  } finally { await rm(fake.directory, { recursive: true, force: true }); }
+    assert.deepEqual(
+      JSON.parse(await readFile(fake.statePath, "utf8")).container,
+      false,
+    );
+    assert.deepEqual(
+      JSON.parse(await readFile(fake.statePath, "utf8")).volume,
+      false,
+    );
+  } finally {
+    await rm(fake.directory, { recursive: true, force: true });
+  }
 });
 
-test('an unowned database is rejected before migrations or tests can run', async () => {
+test("an unowned database is rejected before migrations or tests can run", async () => {
   const fake = await createFakeVerification();
   try {
-    const result = fake.run({ FAKE_OWNERSHIP_FAIL: 'true' });
+    const result = fake.run({ FAKE_OWNERSHIP_FAIL: "true" });
     assert.equal(result.status, 41, `${result.stdout}\n${result.stderr}`);
     const log = await readFakeLog(fake);
-    const guardIndex = log.indexOf('scripts/check-test-database.ts');
-    const ownershipIndex = log.indexOf('scripts/check-verification-database.ts');
+    const guardIndex = log.indexOf("scripts/check-test-database.ts");
+    const ownershipIndex = log.indexOf(
+      "scripts/check-verification-database.ts",
+    );
     assert.ok(guardIndex >= 0 && ownershipIndex > guardIndex);
     assert.doesNotMatch(log, /migrations\//);
     assert.doesNotMatch(log, /"command":"npm"/);
-    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')).container, false);
-    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')).volume, false);
-  } finally { await rm(fake.directory, { recursive: true, force: true }); }
+    assert.deepEqual(
+      JSON.parse(await readFile(fake.statePath, "utf8")).container,
+      false,
+    );
+    assert.deepEqual(
+      JSON.parse(await readFile(fake.statePath, "utf8")).volume,
+      false,
+    );
+  } finally {
+    await rm(fake.directory, { recursive: true, force: true });
+  }
 });
 
-test('a forced verification failure still removes its container and volume', async () => {
-  const fake = await createFakeVerification();
-  try {
-    const result = fake.run({ FAKE_NPM_FAIL_COMMAND: 'run typecheck', FAKE_NPM_EXIT: '42' });
-    assert.equal(result.status, 42, `${result.stdout}\n${result.stderr}`);
-    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')).container, false);
-    assert.deepEqual(JSON.parse(await readFile(fake.statePath, 'utf8')).volume, false);
-  } finally { await rm(fake.directory, { recursive: true, force: true }); }
-});
-
-test('cleanup accepts explicit not-found evidence while preserving setup failure', async () => {
-  const fake = await createFakeVerification();
-  try {
-    const result = fake.run({ FAKE_DOCKER_RUN_FAIL: 'true' });
-    assert.equal(result.status, 44, `${result.stdout}\n${result.stderr}`);
-    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /could not verify.*absence/);
-  } finally { await rm(fake.directory, { recursive: true, force: true }); }
-});
-
-test('cleanup inspection errors make an otherwise successful verification fail', async () => {
-  const fake = await createFakeVerification();
-  try {
-    const result = fake.run({ FAKE_INSPECT_ERROR: 'true' });
-    assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
-    assert.match(`${result.stdout}\n${result.stderr}`, /could not verify.*absence/);
-  } finally { await rm(fake.directory, { recursive: true, force: true }); }
-});
-
-test('cleanup failure is surfaced without replacing the original verification failure', async () => {
+test("a forced verification failure still removes its container and volume", async () => {
   const fake = await createFakeVerification();
   try {
     const result = fake.run({
-      FAKE_NPM_FAIL_COMMAND: 'run typecheck', FAKE_NPM_EXIT: '42', FAKE_INSPECT_ERROR: 'true',
+      FAKE_NPM_FAIL_COMMAND: "run typecheck",
+      FAKE_NPM_EXIT: "42",
     });
     assert.equal(result.status, 42, `${result.stdout}\n${result.stderr}`);
-    assert.match(`${result.stdout}\n${result.stderr}`, /could not verify.*absence/);
-  } finally { await rm(fake.directory, { recursive: true, force: true }); }
+    assert.deepEqual(
+      JSON.parse(await readFile(fake.statePath, "utf8")).container,
+      false,
+    );
+    assert.deepEqual(
+      JSON.parse(await readFile(fake.statePath, "utf8")).volume,
+      false,
+    );
+  } finally {
+    await rm(fake.directory, { recursive: true, force: true });
+  }
 });
 
-test('pull-request CI runs the repository verification command with a stable check', async () => {
-  const workflow = await readRepositoryFile('.github/workflows/verify.yml');
+test("cleanup accepts explicit not-found evidence while preserving setup failure", async () => {
+  const fake = await createFakeVerification();
+  try {
+    const result = fake.run({ FAKE_DOCKER_RUN_FAIL: "true" });
+    assert.equal(result.status, 44, `${result.stdout}\n${result.stderr}`);
+    assert.doesNotMatch(
+      `${result.stdout}\n${result.stderr}`,
+      /could not verify.*absence/,
+    );
+  } finally {
+    await rm(fake.directory, { recursive: true, force: true });
+  }
+});
+
+test("cleanup inspection errors make an otherwise successful verification fail", async () => {
+  const fake = await createFakeVerification();
+  try {
+    const result = fake.run({ FAKE_INSPECT_ERROR: "true" });
+    assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+    assert.match(
+      `${result.stdout}\n${result.stderr}`,
+      /could not verify.*absence/,
+    );
+  } finally {
+    await rm(fake.directory, { recursive: true, force: true });
+  }
+});
+
+test("cleanup failure is surfaced without replacing the original verification failure", async () => {
+  const fake = await createFakeVerification();
+  try {
+    const result = fake.run({
+      FAKE_NPM_FAIL_COMMAND: "run typecheck",
+      FAKE_NPM_EXIT: "42",
+      FAKE_INSPECT_ERROR: "true",
+    });
+    assert.equal(result.status, 42, `${result.stdout}\n${result.stderr}`);
+    assert.match(
+      `${result.stdout}\n${result.stderr}`,
+      /could not verify.*absence/,
+    );
+  } finally {
+    await rm(fake.directory, { recursive: true, force: true });
+  }
+});
+
+test("pull-request CI runs the repository verification command with a stable check", async () => {
+  const workflow = await readRepositoryFile(".github/workflows/verify.yml");
   assert.match(workflow, /^name: verify$/m);
   assert.match(workflow, /^  pull_request:$/m);
   assert.match(workflow, /^      - main$/m);
@@ -348,9 +488,15 @@ test('pull-request CI runs the repository verification command with a stable che
   assert.match(workflow, /^  cancel-in-progress: true$/m);
   assert.match(workflow, /^    name: verify$/m);
   assert.match(workflow, /^    timeout-minutes: 20$/m);
-  assert.match(workflow, /^          ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}$/m);
+  assert.match(
+    workflow,
+    /^          ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}$/m,
+  );
   assert.match(workflow, /^          persist-credentials: false$/m);
-  assert.match(workflow, /EXPECTED_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(
+    workflow,
+    /EXPECTED_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/,
+  );
   assert.match(workflow, /actual_head_sha="\$\(git rev-parse HEAD\)"/);
   assert.match(workflow, /"\$actual_head_sha" != "\$EXPECTED_HEAD_SHA"/);
   assert.match(workflow, /GITHUB_STEP_SUMMARY/);
@@ -359,10 +505,10 @@ test('pull-request CI runs the repository verification command with a stable che
   assert.doesNotMatch(workflow, /secrets\./);
 });
 
-test('review guidance derives exact-head evidence from verified PR-head identity', async () => {
+test("review guidance derives exact-head evidence from verified PR-head identity", async () => {
   const [reviewSkill, testingGuide] = await Promise.all([
-    readRepositoryFile('.agents/skills/relay-review/SKILL.md'),
-    readRepositoryFile('docs/Relay_Testing_and_Worker_Guide.md'),
+    readRepositoryFile(".agents/skills/relay-review/SKILL.md"),
+    readRepositoryFile("docs/Relay_Testing_and_Worker_Guide.md"),
   ]);
   for (const guidance of [reviewSkill, testingGuide]) {
     assert.match(guidance, /synthetic merge commit/i);
@@ -371,6 +517,8 @@ test('review guidance derives exact-head evidence from verified PR-head identity
     assert.match(guidance, /older pull-request\s+head/i);
     assert.match(guidance, /newer reviewed fixed point/i);
   }
-  assert.doesNotMatch(reviewSkill,
-    /only if GitHub reports that check for the exact `HEAD` commit under review/);
+  assert.doesNotMatch(
+    reviewSkill,
+    /only if GitHub reports that check for the exact `HEAD` commit under review/,
+  );
 });

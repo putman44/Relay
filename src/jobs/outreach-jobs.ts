@@ -232,7 +232,9 @@ export const requeueFailedOutreachJob = async (
     }
 
     if (state.sent_message_id || state.sent_at) {
-      throw new Error("Outreach draft already contains confirmed send evidence");
+      throw new Error(
+        "Outreach draft already contains confirmed send evidence",
+      );
     }
 
     const updatedResult = await client.query<OutreachJob>(

@@ -131,5 +131,7 @@ test("Prospect intake without a website uses request identity and skips website 
   });
   assert.ok(statements.includes("COMMIT"));
   assert.ok(!statements.some((sql) => sql.includes("WHERE identity_key = $1")));
-  assert.ok(!statements.some((sql) => sql.includes("WHERE website IS NOT NULL")));
+  assert.ok(
+    !statements.some((sql) => sql.includes("WHERE website IS NOT NULL")),
+  );
 });

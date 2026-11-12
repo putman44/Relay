@@ -54,7 +54,10 @@ test("Systemd monitor: environment template contains no Gmail credentials", asyn
 
   assert.match(environment, /^DATABASE_URL=postgresql:\/\//m);
   assert.match(environment, /^RELAY_ENABLE_LIVE_OUTREACH_SEND=false$/m);
-  assert.doesNotMatch(environment, /GOOGLE_(CLIENT_ID|CLIENT_SECRET|REFRESH_TOKEN)/);
+  assert.doesNotMatch(
+    environment,
+    /GOOGLE_(CLIENT_ID|CLIENT_SECRET|REFRESH_TOKEN)/,
+  );
 });
 
 test("Docker monitor: image contains only the monitor entrypoint", async () => {

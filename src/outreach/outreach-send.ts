@@ -129,11 +129,17 @@ export async function claimOutreachSend(
     // Run the remaining outreach business-rule checks before
     // changing the draft into the sending state.
     const validation = validateOutreachSend(prospect, draft);
-    const unhealthy = await client.query(`SELECT 1 WHERE EXISTS (SELECT 1 FROM message_drafts d
+    const unhealthy = await client.query(
+      `SELECT 1 WHERE EXISTS (SELECT 1 FROM message_drafts d
       JOIN reply_thread_checks c ON c.draft_id = d.id
       WHERE d.prospect_id = $1 AND c.status <> 'ok')
-      OR EXISTS (SELECT 1 FROM prospect_replies r WHERE r.prospect_id = $1)`, [prospectId]);
-    if (unhealthy.rowCount) validation.errors.push("Reply monitoring requires attention before cold outreach.");
+      OR EXISTS (SELECT 1 FROM prospect_replies r WHERE r.prospect_id = $1)`,
+      [prospectId],
+    );
+    if (unhealthy.rowCount)
+      validation.errors.push(
+        "Reply monitoring requires attention before cold outreach.",
+      );
     validation.valid = validation.errors.length === 0;
 
     if (!validation.valid) {
@@ -219,7 +225,9 @@ export async function completeOutreachSend(
   try {
     await client.query("BEGIN");
     // Serialize with reply recording before reading reply state or locking drafts.
-    await client.query("SELECT id FROM prospects WHERE id = $1 FOR UPDATE", [prospectId]);
+    await client.query("SELECT id FROM prospects WHERE id = $1 FOR UPDATE", [
+      prospectId,
+    ]);
 
     // Lock the draft while completing the send.
     // The draft must also belong to the supplied prospect.

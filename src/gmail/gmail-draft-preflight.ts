@@ -1,6 +1,6 @@
 import PostalMime from "postal-mime";
-import type { ApprovedGmailDraft } from "./gmail-types.js";
 import { GmailPreflightError } from "./gmail-preflight-error.js";
+import type { ApprovedGmailDraft } from "./gmail-types.js";
 
 export type GmailDraftSnapshot = {
   id?: string | null;
@@ -15,7 +15,11 @@ export type GmailDraftSnapshot = {
 export type GmailDraftReadApi = {
   users: {
     drafts: {
-      get: (request: { userId: string; id: string; format: "raw" }) => Promise<{ data: GmailDraftSnapshot }>;
+      get: (request: {
+        userId: string;
+        id: string;
+        format: "raw";
+      }) => Promise<{ data: GmailDraftSnapshot }>;
     };
   };
 };
@@ -32,10 +36,17 @@ export const verifyGmailDraftSnapshot = async (
   snapshot: GmailDraftSnapshot,
 ): Promise<{ raw: string; threadId: string }> => {
   const message = snapshot.message;
-  if (snapshot.id !== draftId || !message?.id?.trim() || !message.threadId?.trim()) {
+  if (
+    snapshot.id !== draftId ||
+    !message?.id?.trim() ||
+    !message.threadId?.trim()
+  ) {
     stop("draft identity is missing or does not match.");
   }
-  if (!message.labelIds?.includes("DRAFT") || message.labelIds.includes("SENT")) {
+  if (
+    !message.labelIds?.includes("DRAFT") ||
+    message.labelIds.includes("SENT")
+  ) {
     stop("message is not an unsent Gmail draft.");
   }
   if (approved.threadId && message.threadId !== approved.threadId) {
@@ -51,14 +62,19 @@ export const verifyGmailDraftSnapshot = async (
   }
   const source = bytes.toString("utf8");
   const headerBlock = source.split(/\r?\n\r?\n/, 1)[0];
-  if (!headerBlock || headerBlock.length === source.length || source.includes("\0")
-    || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\r(?!\n)/.test(headerBlock)) {
+  if (
+    !headerBlock ||
+    headerBlock.length === source.length ||
+    source.includes("\0") ||
+    /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|\r(?!\n)/.test(headerBlock)
+  ) {
     stop("MIME headers are malformed.");
   }
   let hasHeader = false;
   for (const line of headerBlock.split(/\r?\n/)) {
     if (/^[ \t]/.test(line) && hasHeader) continue;
-    if (!/^[!\x23-\x39\x3b-\x7e]+:/.test(line)) stop("MIME header syntax is ambiguous.");
+    if (!/^[!\x23-\x39\x3b-\x7e]+:/.test(line))
+      stop("MIME header syntax is ambiguous.");
     hasHeader = true;
   }
   let email;
@@ -69,30 +85,59 @@ export const verifyGmailDraftSnapshot = async (
   }
   const headers = email.headers;
   const count = (name: string) => headers.filter((h) => h.key === name).length;
-  if (approved.parentMessageId && (count('in-reply-to') !== 1 || count('references') !== 1
-    || email.inReplyTo !== approved.parentMessageId || email.references !== approved.parentMessageId)) {
-    stop('reply parent differs from the approved thread context.');
+  if (
+    approved.parentMessageId &&
+    (count("in-reply-to") !== 1 ||
+      count("references") !== 1 ||
+      email.inReplyTo !== approved.parentMessageId ||
+      email.references !== approved.parentMessageId)
+  ) {
+    stop("reply parent differs from the approved thread context.");
   }
-  if (count("to") !== 1 || count("subject") !== 1 || count("content-type") !== 1
-    || count("content-transfer-encoding") > 1 || count("from") > 1) {
+  if (
+    count("to") !== 1 ||
+    count("subject") !== 1 ||
+    count("content-type") !== 1 ||
+    count("content-transfer-encoding") > 1 ||
+    count("from") > 1
+  ) {
     stop("required headers are missing or duplicated.");
   }
-  if (headers.some((h) => ["cc", "bcc", "reply-to", "apparently-to"].includes(h.key) || h.key.startsWith("resent-"))) {
+  if (
+    headers.some(
+      (h) =>
+        ["cc", "bcc", "reply-to", "apparently-to"].includes(h.key) ||
+        h.key.startsWith("resent-"),
+    )
+  ) {
     stop("additional recipient or reply-routing headers require new review.");
   }
   const to = email.to;
   const recipient = to?.[0];
-  if (to?.length !== 1 || !recipient || !("address" in recipient)
-    || !recipient.address || recipient.address.toLowerCase() !== approved.recipientEmail.toLowerCase()) {
+  if (
+    to?.length !== 1 ||
+    !recipient ||
+    !("address" in recipient) ||
+    !recipient.address ||
+    recipient.address.toLowerCase() !== approved.recipientEmail.toLowerCase()
+  ) {
     stop("recipient differs from the approved recipient.");
   }
-  const contentType = headers.find((h) => h.key === "content-type")?.value ?? "";
-  if (!/^text\/plain(?:\s*;|\s*$)/i.test(contentType)
-    || email.html !== undefined || email.attachments.length > 0) {
+  const contentType =
+    headers.find((h) => h.key === "content-type")?.value ?? "";
+  if (
+    !/^text\/plain(?:\s*;|\s*$)/i.test(contentType) ||
+    email.html !== undefined ||
+    email.attachments.length > 0
+  ) {
     stop("only reviewed plain-text drafts without attachments are supported.");
   }
-  if (email.subject !== approved.subject) stop("subject differs from the approved subject.");
-  if (email.text === undefined || newlines(email.text) !== newlines(approved.body)) {
+  if (email.subject !== approved.subject)
+    stop("subject differs from the approved subject.");
+  if (
+    email.text === undefined ||
+    newlines(email.text) !== newlines(approved.body)
+  ) {
     stop("body differs from the approved body.");
   }
   return { raw, threadId: message.threadId };

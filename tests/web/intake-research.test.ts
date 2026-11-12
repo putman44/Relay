@@ -36,9 +36,7 @@ type StartCall = {
   policy: ResearchStartPolicy;
 };
 
-function fakeWorkflow(
-  overrides: Partial<IntakeResearchWorkflow> = {},
-): {
+function fakeWorkflow(overrides: Partial<IntakeResearchWorkflow> = {}): {
   load: () => Promise<IntakeResearchWorkflow>;
   starts: StartCall[];
   lookups: [string, Pool][];

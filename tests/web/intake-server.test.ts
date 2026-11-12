@@ -318,7 +318,11 @@ test("Intake UI: review and creation accept a prospect without a website", async
   const review = await post(harness, "/review", { ...rawFields, website: "" });
   assert.equal(review.status, 200);
   assert.ok(review.body.includes('<span class="empty">Not provided</span>'));
-  const reply = await post(harness, "/prospects", confirmed(hiddenFields(review.body)));
+  const reply = await post(
+    harness,
+    "/prospects",
+    confirmed(hiddenFields(review.body)),
+  );
   assert.equal(reply.status, 201);
   assert.equal(harness.calls[0]?.website, null);
 });
@@ -945,7 +949,12 @@ test("Intake UI: the research status page reports running, completed, and needs-
 
 test("Intake UI: the status page hides a stale last_error while research runs or after it completes", async (t) => {
   const stale = "Earlier attempt: provider timed out.";
-  for (const status of ["researching", "brief_ready", "research_review", "completed"] as const) {
+  for (const status of [
+    "researching",
+    "brief_ready",
+    "research_review",
+    "completed",
+  ] as const) {
     const fake = fakeResearch(summary(status, { last_error: stale }));
     const harness = await startHarness(t, { research: fake.research });
     const reply = await researchStatus(harness);
@@ -997,7 +1006,9 @@ test("Intake UI: research that stops after recording a request needs review and 
   const reply = await researchStatus(harness);
   assert.ok(reply.body.includes("<h1>Research needs review</h1>"));
   assert.ok(
-    reply.body.includes("Research or provider failed; inspect before new work."),
+    reply.body.includes(
+      "Research or provider failed; inspect before new work.",
+    ),
   );
   assert.ok(!reply.body.includes(REFRESH));
   assert.doesNotMatch(reply.body, START_FORM);
@@ -1096,7 +1107,9 @@ test("Intake UI: research is not started when its durable state cannot be read",
   const harness = await startHarness(t, {
     research: {
       getRequest: async () => {
-        throw new Error("connection failed for private.contact@devbytaylor.com");
+        throw new Error(
+          "connection failed for private.contact@devbytaylor.com",
+        );
       },
       start: async (prospectId) => {
         started.push(prospectId);

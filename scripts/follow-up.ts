@@ -1,29 +1,55 @@
-import 'dotenv/config';
-import { parseFollowUpArgs } from '../src/operator/follow-up-input.js';
-import { assertLiveOutreachSendEnabled } from '../src/jobs/live-outreach-send-guard.js';
+import "dotenv/config";
+import { assertLiveOutreachSendEnabled } from "../src/jobs/live-outreach-send-guard.js";
+import { parseFollowUpArgs } from "../src/operator/follow-up-input.js";
 
 async function main() {
   const command = parseFollowUpArgs(process.argv.slice(2));
-  if (command.action === 'send') assertLiveOutreachSendEnabled();
-  const { db } = await import('../src/db.js');
+  if (command.action === "send") assertLiveOutreachSendEnabled();
+  const { db } = await import("../src/db.js");
   try {
-    const { inspectFollowUp,createFollowUpDraft } = await import('../src/outreach/follow-up-creation.js');
-    const { approveFollowUpDraft,sendApprovedFollowUp } = await import('../src/outreach/follow-up-send.js');
+    const { inspectFollowUp, createFollowUpDraft } =
+      await import("../src/outreach/follow-up-creation.js");
+    const { approveFollowUpDraft, sendApprovedFollowUp } =
+      await import("../src/outreach/follow-up-send.js");
     let result;
-    if (command.action === 'plan') result = await inspectFollowUp(command.prospectId,command.timeZone,db);
-    else if (command.action === 'approve') result = await approveFollowUpDraft(command.draftId,db);
+    if (command.action === "plan")
+      result = await inspectFollowUp(command.prospectId, command.timeZone, db);
+    else if (command.action === "approve")
+      result = await approveFollowUpDraft(command.draftId, db);
     else {
-      const { createProductionGmailDraftCreator,createProductionGmailThreadReader } = await import('../src/gmail/gmail-runtime.js');
+      const {
+        createProductionGmailDraftCreator,
+        createProductionGmailThreadReader,
+      } = await import("../src/gmail/gmail-runtime.js");
       const readThread = createProductionGmailThreadReader();
-      if (command.action === 'draft') result = await createFollowUpDraft(command.prospectId,command.timeZone,
-        { database:db,readThread,createGmailDraft:createProductionGmailDraftCreator() });
+      if (command.action === "draft")
+        result = await createFollowUpDraft(
+          command.prospectId,
+          command.timeZone,
+          {
+            database: db,
+            readThread,
+            createGmailDraft: createProductionGmailDraftCreator(),
+          },
+        );
       else {
-        const { createGmailApi,createGmailOAuthClient,loadGmailCredentials } = await import('../src/gmail/gmail-auth.js');
-        result = await sendApprovedFollowUp(command.draftId,
-          { database:db,readThread,gmail:createGmailApi(createGmailOAuthClient(loadGmailCredentials())) });
+        const { createGmailApi, createGmailOAuthClient, loadGmailCredentials } =
+          await import("../src/gmail/gmail-auth.js");
+        result = await sendApprovedFollowUp(command.draftId, {
+          database: db,
+          readThread,
+          gmail: createGmailApi(createGmailOAuthClient(loadGmailCredentials())),
+        });
       }
     }
     console.log(JSON.stringify(result));
-  } finally { await db.end(); }
+  } finally {
+    await db.end();
+  }
 }
-main().catch(() => { console.error('Follow-up operation stopped; inspect durable request/draft/attempt state.'); process.exitCode=1; });
+main().catch(() => {
+  console.error(
+    "Follow-up operation stopped; inspect durable request/draft/attempt state.",
+  );
+  process.exitCode = 1;
+});

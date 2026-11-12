@@ -9,9 +9,11 @@ This notebook captures the agentic engineering concepts, workflow patterns, Rela
 ## 1. Core Mental Model
 
 ### Agent
+
 An **agent** is the worker or role doing a job.
 
 Examples:
+
 - Lead / Planner
 - Implementer
 - Reviewer
@@ -23,9 +25,11 @@ A useful shorthand:
 > **Agent = role + context + tools + permissions + workflow**
 
 ### Skill
+
 A **skill** is a reusable playbook or procedure that an agent follows.
 
 Examples in Relay:
+
 - `relay-implement`
 - `relay-review`
 
@@ -37,14 +41,17 @@ A useful shorthand:
 > **Skill = how the work is done**
 
 ### AGENTS.md
+
 `AGENTS.md` is the project's engineering handbook for AI coding tools.
 
 It should contain durable repository-wide instructions and boundaries that should apply repeatedly.
 
 ### GitHub Issue
+
 A GitHub Issue is the durable **work order**.
 
 It should eventually carry:
+
 - problem
 - scope
 - requirements
@@ -53,9 +60,11 @@ It should eventually carry:
 - links to related code / PRs
 
 ### Orchestrator / Lead Agent
+
 The orchestrator acts like an engineering manager.
 
 It should eventually:
+
 - read the ticket
 - decide which specialist is needed
 - route work to the Implementer
@@ -184,6 +193,7 @@ retro / improve system
 We are following the philosophy, but adapting it for Relay rather than blindly copying everything.
 
 ### What we adopted
+
 - reusable skills
 - implementation playbooks
 - separate code review
@@ -193,9 +203,11 @@ We are following the philosophy, but adapting it for Relay rather than blindly c
 - independent review
 
 ### What we changed for Relay
+
 Matt's generic implementation workflow was too permissive for our needs.
 
 For Relay we intentionally:
+
 - do **not** automatically commit
 - do **not** automatically push
 - keep Reviewer independent from Implementer
@@ -230,11 +242,13 @@ skills-lock.json
 ```
 
 ### relay-implement
+
 Purpose:
 
 > Safely implement only explicitly approved Relay work.
 
 Key behavior:
+
 - inspect current repo state
 - preserve pre-existing human work
 - implement the smallest approved change
@@ -248,6 +262,7 @@ Key behavior:
 - do not review its own work
 
 ### relay-review
+
 Purpose:
 
 > Perform an independent, read-only review of Relay changes.
@@ -259,6 +274,7 @@ Three separate review axes:
 3. **Standards**
 
 Key Relay Safety concerns:
+
 - fail-closed behavior
 - idempotency
 - duplicate prevention
@@ -316,7 +332,9 @@ The initial goal:
 > Make prospect-intake and prospect-research database integration tests fail closed rather than silently skip.
 
 ### Implementer result
+
 The Implementer reported:
+
 - focused tests passed
 - typecheck passed
 - full suite passed
@@ -324,6 +342,7 @@ The Implementer reported:
 - no live services touched
 
 ### Reviewer result
+
 The independent Reviewer found a serious issue.
 
 A connection string like:
@@ -349,7 +368,9 @@ That meant a supposedly local test configuration could actually route to a remot
 The Reviewer correctly classified this as a merge-blocking Relay Safety defect.
 
 ### Why this mattered
+
 The test code could:
+
 - create schemas
 - apply migrations
 - write test data
@@ -358,14 +379,17 @@ The test code could:
 So this was exactly the kind of bug the safety review was designed to catch.
 
 ### Remediation
+
 The Implementer then updated the guard to validate the **effective PostgreSQL connection target**, not only the raw URL authority.
 
 Regression coverage was added for the routing override.
 
 ### Human approval boundary
+
 Before running real database-writing verification, the Implementer stopped and required explicit approval.
 
 Taylor authorized only:
+
 - loopback/local database
 - database name `relay_test`
 - `RELAY_TEST_DATABASE_DISPOSABLE=true`
@@ -530,16 +554,19 @@ Verify...
 Eventually the work should be split across durable sources.
 
 ### AGENTS.md
+
 Contains:
 
 > How engineers must behave in this repo.
 
 ### Skill
+
 Contains:
 
 > How to perform this type of job.
 
 ### GitHub Issue
+
 Contains:
 
 > What exact work should be done.
@@ -618,7 +645,9 @@ Choose based on:
 - frequency
 
 ### Strong reasoning tier
+
 Best for:
+
 - Lead / Architect
 - Reviewer
 - architecture decisions
@@ -627,7 +656,9 @@ Best for:
 - recovery / idempotency analysis
 
 ### Faster / cheaper tier
+
 Good for:
+
 - test execution
 - formatting handoffs
 - summarizing logs
@@ -658,6 +689,7 @@ Lead
 ```
 
 Each role should have:
+
 - narrow responsibility
 - clear permissions
 - explicit inputs
@@ -671,7 +703,9 @@ This reduces context rot and makes failures easier to diagnose.
 ## 15. Current Workspaces and Their Purpose
 
 ### Relay_chat
+
 Use for:
+
 - learning
 - architecture discussions
 - planning
@@ -680,14 +714,18 @@ Use for:
 - maintaining this notebook
 
 ### Relay_Local_Work
+
 Use for:
+
 - Codex / Work execution sessions
 - implementation
 - code review
 - test / verification sessions
 
 ### Relay Git repository
+
 Use for:
+
 - source code
 - tests
 - migrations
@@ -696,7 +734,9 @@ Use for:
 - engineering documentation
 
 ### GitHub
+
 Use for:
+
 - durable issues
 - branches
 - commits
@@ -732,6 +772,7 @@ git commit -m "message"
 Using `-m` avoids opening a text editor.
 
 ### Why Vim appeared
+
 A merge needed a commit message and Git had no `-m` argument, so it opened its configured/default terminal editor.
 
 ### Configure VS Code as Git editor
@@ -756,6 +797,7 @@ code --wait
 ```
 
 ### Useful Vim escape knowledge
+
 Save and exit:
 
 ```text
@@ -809,6 +851,7 @@ This is a strong pattern for infrastructure work, hotfixes, or future parallel a
 Relay should keep a human in control of risky actions.
 
 Examples that should require explicit authorization:
+
 - production database access
 - database-writing tests when safety is not already proven
 - live Gmail actions
@@ -854,6 +897,7 @@ Do not rush into a giant orchestration framework.
 Recommended progression:
 
 ### Stage 1 — Current
+
 ```text
 Taylor
 → Codex or Claude Code
@@ -863,6 +907,7 @@ Taylor
 The shared Relay skills are now repository-local and merged into `main`; the current learning goal is to make the manual workflow reliable before adding orchestration.
 
 ### Stage 2 — Better work orders
+
 ```text
 GitHub Issues
 → relay-implement
@@ -870,6 +915,7 @@ GitHub Issues
 ```
 
 ### Stage 3 — Specialized persistent agents
+
 ```text
 Lead
 Implementer
@@ -878,6 +924,7 @@ QA
 ```
 
 ### Stage 4 — Orchestration
+
 ```text
 Taylor gives a goal
      ↓
@@ -895,7 +942,9 @@ Taylor approves
 ```
 
 ### Stage 5 — More autonomy
+
 Only after:
+
 - workflows are stable
 - permissions are clear
 - tests are reliable
@@ -1287,4 +1336,3 @@ Temporary personal Claude symlinks under `~/.claude/skills` were removed after t
 - Use `--force-with-lease`, not casual `--force`, for a rebased remote feature branch.
 - A clean merge is not the end of the job; update local `main`, prune remote-tracking refs, remove temporary worktrees/links, and delete obsolete branches.
 - The professional goal is not to memorize every command. It is to understand what Git object or workspace each command changes: branch history, remote-tracking state, worktree folder, or published remote branch.
-

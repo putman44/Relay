@@ -3,8 +3,8 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { createProductionGmailDraftSender } from "../../src/gmail/gmail-runtime.js";
 import { GmailPreflightError } from "../../src/gmail/gmail-preflight-error.js";
+import { createProductionGmailDraftSender } from "../../src/gmail/gmail-runtime.js";
 
 test("Gmail runtime: creates a production draft sender from environment credentials", () => {
   const sendDraft = createProductionGmailDraftSender({
