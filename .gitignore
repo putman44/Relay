@@ -8,3 +8,10 @@ dist/
 .claude/scheduled_tasks.lock
 .claude/worktrees/
 CLAUDE.local.md
+
+# Local evaluation source captures and generated results
+/evals/fixtures/
+/evals/results/
+
+# Private website evaluation tests
+/evals/local/
