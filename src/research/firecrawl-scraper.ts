@@ -70,6 +70,11 @@ export function createFirecrawlScraper(
     ) {
       throw new Error("Research scrape provenance or content is invalid.");
     }
-    return { url, markdown: data.markdown, links: data.links as string[] };
+    return {
+      url,
+      markdown: data.markdown,
+      links: data.links as string[],
+      scrapedAt: new Date().toISOString(),
+    };
   };
 }

@@ -100,6 +100,52 @@ test("Canonical data foundation: persistence and relational constraints", async 
   );
 
   await t.test(
+    "reuses identical research documents and rejects conflicting retries",
+    async () => {
+      const input = {
+        prospectId,
+        researchRequestId,
+        sourceUrl: "https://canonical-data-fixture.com/about",
+        pageType: "about" as const,
+        title: "About the fixture",
+        content: "Durable source content.",
+        scrapedAt: new Date("2026-11-02T12:00:00.000Z"),
+      };
+
+      // Test 1: Saving the same page again reuses its ID.
+      const repeated = await createResearchDocument(input, database);
+
+      assert.equal(repeated.id, documentId);
+      assert.equal(repeated.content, input.content);
+
+      // Test 2: Changing the content must be rejected.
+      await assert.rejects(
+        createResearchDocument(
+          { ...input, content: "Conflicting website content." },
+          database,
+        ),
+        /Existing research document conflicts with saved evidence/,
+      );
+
+      // Test 3: The original document remains unchanged.
+      const saved = await database.query<{
+        id: string;
+        content: string;
+      }>(
+        `SELECT id, content
+       FROM research_documents
+       WHERE research_request_id = $1
+         AND source_url = $2`,
+        [researchRequestId, input.sourceUrl],
+      );
+
+      assert.equal(saved.rows.length, 1);
+      assert.equal(saved.rows[0]?.id, documentId);
+      assert.equal(saved.rows[0]?.content, input.content);
+    },
+  );
+
+  await t.test(
     "persists a research chunk with the document source and no embedding",
     async () => {
       const chunk = await createResearchChunk(

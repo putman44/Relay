@@ -1,6 +1,11 @@
 import { isIP } from "node:net";
 
-export type ResearchPage = { url: string; markdown: string; links: string[] };
+export type ResearchPage = {
+  url: string;
+  markdown: string;
+  links: string[];
+  scrapedAt?: string;
+};
 export type ResearchEvidence = { pages: ResearchPage[]; limitations: string[] };
 export type PageScraper = (url: string) => Promise<ResearchPage>;
 
@@ -110,6 +115,18 @@ export function validateResearchEvidence(
     if (!page || typeof page !== "object" || Array.isArray(page))
       throw new Error("Research page is invalid.");
     const p = page as ResearchPage;
+
+    const parsedScrapedAt =
+      typeof p.scrapedAt === "string" ? Date.parse(p.scrapedAt) : NaN;
+
+    if (
+      p.scrapedAt !== undefined &&
+      (!Number.isFinite(parsedScrapedAt) ||
+        new Date(parsedScrapedAt).toISOString() !== p.scrapedAt)
+    ) {
+      throw new Error("Research page has an invalid scrape timestamp.");
+    }
+
     const url = safeResearchUrl(p.url, new URL(root).origin);
     if (
       url !== p.url ||

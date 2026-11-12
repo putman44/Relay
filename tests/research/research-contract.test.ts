@@ -1,10 +1,19 @@
 import { strict as assert } from "node:assert";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
+import { parseResearchArgs } from "../../src/operator/research-input.js";
+import {
+  researchMutationOutput,
+  researchStatusOutput,
+} from "../../src/operator/research-output.js";
+import { createFirecrawlScraper } from "../../src/research/firecrawl-scraper.js";
+import { createOpenAIResearcher } from "../../src/research/openai-researcher.js";
+import type { ResearchRequest } from "../../src/research/prospect-research.js";
 import {
   collectResearchEvidence,
   equivalentResearchSourceUrl,
   safeResearchUrl,
+  validateResearchEvidence,
 } from "../../src/research/research-evidence.js";
 import {
   renderResearchBrief,
@@ -12,14 +21,6 @@ import {
   validateResearchResult,
   type ResearchResult,
 } from "../../src/research/research-result.js";
-import { createFirecrawlScraper } from "../../src/research/firecrawl-scraper.js";
-import { createOpenAIResearcher } from "../../src/research/openai-researcher.js";
-import { parseResearchArgs } from "../../src/operator/research-input.js";
-import {
-  researchMutationOutput,
-  researchStatusOutput,
-} from "../../src/operator/research-output.js";
-import type { ResearchRequest } from "../../src/research/prospect-research.js";
 
 const root = "https://business.example.com/";
 const contact = "https://business.example.com/contact";
@@ -713,5 +714,53 @@ test("Research CLI output shows the stored Gmail-draft policy", () => {
     researchMutationOutput({ ...stored, gmail_draft_allowed: true })
       .gmailDraftAllowed,
     true,
+  );
+});
+
+test("Firecrawl preserves the scrape timestamp in research evidence", async () => {
+  const scraper = createFirecrawlScraper("fake-key", async () => ({
+    ok: true,
+    text: async () =>
+      JSON.stringify({
+        success: true,
+        data: {
+          markdown: "Business website content.",
+          links: [],
+          metadata: {
+            sourceURL: root,
+            statusCode: 200,
+          },
+        },
+      }),
+  }));
+
+  const before = Date.now();
+  const page = await scraper(root);
+  const after = Date.now();
+
+  assert.ok(page.scrapedAt);
+  assert.ok(Date.parse(page.scrapedAt) >= before);
+  assert.ok(Date.parse(page.scrapedAt) <= after);
+
+  const evidence = validateResearchEvidence(
+    {
+      pages: [page],
+      limitations: [],
+    },
+    root,
+  );
+
+  assert.equal(evidence.pages[0]?.scrapedAt, page.scrapedAt);
+
+  assert.throws(
+    () =>
+      validateResearchEvidence(
+        {
+          pages: [{ ...page, scrapedAt: "invalid-date" }],
+          limitations: [],
+        },
+        root,
+      ),
+    /invalid scrape timestamp/,
   );
 });

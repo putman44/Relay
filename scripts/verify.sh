@@ -204,4 +204,9 @@ for migration_file in "${migration_files[@]}"; do
 done
 
 run_guarded npm run typecheck
-run_guarded npm test
+
+if (( $# > 0 )); then
+  run_guarded node --import tsx --test "$@"
+else
+  run_guarded npm test
+fi

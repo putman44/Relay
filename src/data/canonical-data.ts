@@ -122,12 +122,18 @@ export async function createResearchDocument(
   const title = optionalText(input.title, "title", 1000);
   const content = text(input.content, "content", 1_000_000);
   const scrapedAt = timestamp(input.scrapedAt, "scrapedAt");
+
   const result = await database.query<ResearchDocument>(
     `
     INSERT INTO research_documents (
-      prospect_id, research_request_id, source_url, page_type, title, content, scraped_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7)
-    RETURNING *`,
+      prospect_id, research_request_id, source_url,
+      page_type, title, content, scraped_at
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7)
+    ON CONFLICT (research_request_id, source_url)
+      DO NOTHING
+    RETURNING *
+  `,
     [
       prospectId,
       researchRequestId,
@@ -138,9 +144,33 @@ export async function createResearchDocument(
       scrapedAt,
     ],
   );
-  const document = result.rows[0];
-  if (!document)
-    throw new Error("Research document persistence did not return a record.");
+
+  if (result.rows[0]) return result.rows[0];
+
+  const existing = await database.query<ResearchDocument>(
+    `
+    SELECT *
+    FROM research_documents
+    WHERE research_request_id = $1
+      AND source_url = $2
+  `,
+    [researchRequestId, sourceUrl],
+  );
+
+  const document = existing.rows[0];
+
+  if (
+    !document ||
+    document.prospect_id !== prospectId ||
+    document.page_type !== input.pageType ||
+    document.title !== title ||
+    document.content !== content
+  ) {
+    throw new Error(
+      "Existing research document conflicts with saved evidence.",
+    );
+  }
+
   return document;
 }
 
