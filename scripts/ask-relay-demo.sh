@@ -81,6 +81,10 @@ sql() {
 }
 
 site_prospect() {
+  case " ${SITES[*]} " in
+    *" $1 "*) ;;
+    *) fail "Unknown site: $1 (use one of: ${SITES[*]})" ;;
+  esac
   node --import tsx scripts/seed-ask-relay-demo.ts id "$1"
 }
 
