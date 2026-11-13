@@ -17,6 +17,7 @@
     "reply:process": "tsx scripts/process-reply.ts",
     "follow-up": "tsx scripts/follow-up.ts",
     "research": "tsx scripts/research-prospect.ts",
+    "ask-relay": "tsx scripts/ask-relay.ts",
     "outreach:operator": "tsx scripts/outreach-operator.ts"
   },
   "keywords": [],

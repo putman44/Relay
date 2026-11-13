@@ -1196,3 +1196,21 @@ described above. The intake and research suites enforce it in-process; older
 focused database suites rely on the operator to supply it correctly.
 Requests/attempts are durable blocks, not permission to automatically retry;
 production recovery tooling and controlled external acceptance remain pending.
+
+## Ask Relay vector retrieval
+
+Migration 015 selects `text-embedding-3-small` (1536 dimensions) for
+`research_chunks.embedding`. The Ask Relay slice chunks saved research
+documents, embeds them, searches one prospect's chunks by cosine distance, and
+answers only from verified citations. See `docs/Ask_Relay_Demo.md`.
+
+| Test | What it protects |
+| --- | --- |
+| `tests/research/research-chunker.test.ts` | Deterministic chunks that are exact source slices, heading and paragraph boundaries, image-only blocks and thematic breaks excluded, size limits, oversized-block splitting without losing words or splitting surrogate pairs |
+| `tests/research/ask-relay.test.ts` | Embedding and answer request shapes with fake transports, response validation (count, order, 1536 finite dimensions), strict answer schema limited to retrieved source ids, verbatim citation checks, explicit `--confirm-*` arguments, and output that lists only verified source URLs |
+| `tests/data/research-embeddings.test.ts` | Migration 015 vector constraints, embed-once indexing with reuse on re-run, no partial writes after a failed embedding call, filling earlier unembedded chunks without duplicates, fail-closed conflicts with stored chunks, prospect-scoped search and answers that never return another prospect's chunks, no provider calls without embedded research, and withheld answers with fabricated citations |
+
+The two `tests/research` files need no database. The `tests/data` file writes
+through `RELAY_DRAFT_TEST_DATABASE_URL` and requires the guarded disposable
+`relay_test` configuration; `npm run verify` provides it. All three use fake
+providers and make no OpenAI calls.

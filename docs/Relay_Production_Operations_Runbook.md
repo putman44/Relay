@@ -123,6 +123,33 @@ above use configured providers: run them against live or production systems only
 as a separately approved operation with the intended database, scopes, Drive
 parent, prospect/request ID, and stored Gmail policy verified first.
 
+### Ask Relay commands
+
+Ask Relay requires migration 015, which selects `text-embedding-3-small`
+(1536 dimensions) for `research_chunks.embedding`. It is currently a
+demonstration slice; the repeatable local demo is in `docs/Ask_Relay_Demo.md`.
+
+```bash
+npm run ask-relay -- preview --prospect PROSPECT_UUID
+npm run ask-relay -- index --prospect PROSPECT_UUID --confirm-embeddings
+npm run ask-relay -- ask --prospect PROSPECT_UUID --confirm-openai "QUESTION"
+```
+
+- `preview` reads saved research documents and stored chunks only. It shows how
+  each document would be chunked and how many chunks are embedded.
+- `index` is a provider-using mutation. It chunks the prospect's saved research
+  documents deterministically, calls OpenAI embeddings for chunks that have no
+  embedding, and writes them. Re-running reuses stored embeddings without a
+  provider call. Stored chunks that differ from the current chunking stop the
+  command; nothing is overwritten or deleted.
+- `ask` calls OpenAI to embed the question and draft an answer, and reads only
+  that prospect's chunks. Citations must quote the retrieved chunks verbatim;
+  otherwise the answer is withheld as insufficient evidence.
+
+These commands use `DATABASE_URL`, which `.env` may point at production. Run
+`index` against a shared or production database only as a separately approved
+operation, after migration 015 has gone through the reviewed migration process.
+
 ---
 
 ## 3. Read-Only Health Check

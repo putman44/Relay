@@ -189,11 +189,13 @@ chunk_index
 created_at
 ```
 
-Phase 1 installs pgvector and creates the `embedding` column, but intentionally
-requires it to remain `NULL`. Relay has not selected an embedding model, so its
-dimension is not yet known. A later migration must select and document the model
-and dimension, change the column to `vector(<dimension>)`, and remove the
-temporary null-only constraint before embedding generation or retrieval begins.
+Phase 1 installed pgvector and created the `embedding` column, but required it
+to remain `NULL` until a model was selected. Migration 015 selects OpenAI
+`text-embedding-3-small` with 1536 dimensions: `embedding` is `vector(1536)`,
+and a new `embedding_model` column must name that model exactly when an
+embedding is present. Changing the model or dimension requires a new migration.
+The first consumer is the Ask Relay vertical slice, which searches one
+prospect's chunks at a time; see `docs/Ask_Relay_Demo.md`.
 
 The embedding allows Relay to perform semantic searches across business research.
 
