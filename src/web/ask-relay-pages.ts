@@ -21,7 +21,7 @@ select{width:100%;padding:.55rem .65rem;font:inherit;color:inherit;background:va
 select:focus,summary:focus{outline:2px solid var(--accent);outline-offset:2px}
 .hint{margin:.35rem 0 0;color:var(--muted);font-size:.85rem}
 .answer{margin:.25rem 0 0;font-size:1.05rem;white-space:pre-wrap;overflow-wrap:anywhere}
-.sources{margin:0;padding:0;list-style:none}
+.sources{margin:.75rem 0 0;padding:0;list-style:none}
 .sources li{padding:.75rem 0;border-bottom:1px solid var(--line)}
 .sources li:first-child{padding-top:0}
 .sources li:last-child{padding-bottom:0;border-bottom:0}
