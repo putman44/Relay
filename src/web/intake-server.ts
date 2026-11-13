@@ -81,6 +81,7 @@ export type IntakeServerDependencies = {
     askHandler: (getServer: () => Server) => ((req: IncomingMessage, res: ServerResponse) => Promise<void>) & {
       inlineAnswer: (prospectId: string, askId: string) => { content: string; refresh: boolean } | null;
     };
+    researchIndex?: (prospectId: string) => Promise<void>;
   };
   generateRequestId?: () => string;
   log?: (event: IntakeServerEvent) => void;
@@ -523,6 +524,22 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
     ? dependencies.dashboard.askHandler(() => server)
     : undefined;
   const dashboardRoutes: [string, Route][] = dependencies.dashboard ? [
+    ["/research-index", { method: "POST", handle: async (req, res, host) => {
+      if (!dependencies.dashboard?.researchIndex) return sendError(res, 404, "Unavailable", "Website indexing is unavailable.");
+      const fields = await readFields(req, res, host, RESEARCH_FORM_FIELDS);
+      if (!fields) return;
+      const id = fields.get(RESEARCH_PROSPECT_FIELD)?.toLowerCase() ?? "";
+      if (fields.get(INTAKE_CONFIRM_FIELD) !== "research-index" || !UUID.test(id))
+        return sendError(res, 400, "Confirmation required", "Website indexing requires an explicit confirmation.");
+      const prospect = (await dependencies.dashboard.listProspects()).find((p) => p.id === id);
+      if (!prospect || (prospect.embeddedChunks && (!('websiteIndexStatus' in prospect) || prospect.websiteIndexStatus === "ready")))
+        return sendError(res, 409, "Research unavailable", "This prospect is already indexed or unavailable.");
+      // The durable reservation in researchIndex rejects duplicate starts.
+      void dependencies.dashboard.researchIndex(id).catch((error: unknown) =>
+        log({ event: "research_stopped", prospectId: id, error: errorKind(error) }));
+      res.writeHead(303, { ...PAGE_HEADERS, "content-length": 0, location: `/prospect?id=${encodeURIComponent(id)}` });
+      res.end();
+    }}],
     ["/new", { method: "GET", handle: (_req, res) => sendPage(res, 200, renderIntakeForm({ requestId: generateRequestId() })) }],
     ["/prospect", { method: "GET", handle: async (req, res) => {
       const query = new URLSearchParams((req.url ?? "").split("?", 2)[1] ?? "");

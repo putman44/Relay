@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { DashboardProspect } from "../data/research-embeddings.js";
 import { askForm, ASK_STYLE } from "./ask-relay-pages.js";
 import { escapeHtml } from "./intake-pages.js";
+import { safeResearchUrl } from "../research/research-evidence.js";
 
 const STYLE = `${ASK_STYLE}
 main{max-width:76rem;padding-top:1.5rem}
@@ -50,6 +51,19 @@ function statusLabel(prospect: DashboardProspect): string {
   return STAGE_LABELS[prospect.stage] ?? "Status unavailable";
 }
 
+function canResearch(prospect: DashboardProspect): boolean {
+  if (prospect.embeddedChunks || prospect.websiteIndexStatus || prospect.stage !== "researching" || !prospect.website) return false;
+  try { safeResearchUrl(prospect.website); return true; } catch { return false; }
+}
+
+function indexLabel(prospect: DashboardProspect): string {
+  if (prospect.embeddedChunks && (!prospect.websiteIndexStatus || prospect.websiteIndexStatus === "ready")) return "Ready";
+  if (prospect.websiteIndexStatus === "researching") return "Researching";
+  if (prospect.websiteIndexStatus === "indexing") return "Indexing";
+  if (prospect.websiteIndexStatus === "needs_review" || prospect.websiteIndexStatus === "ready") return "Needs review";
+  return "Not researched";
+}
+
 export function renderDashboard(
   prospects: readonly DashboardProspect[],
   selected: DashboardProspect | undefined,
@@ -63,7 +77,8 @@ export function renderDashboard(
   const detail = selected
     ? `<section aria-label="Prospect detail">
 <h2 class="prospect-heading">${escapeHtml(selected.companyName)}</h2>
-<div class="ask-area">${selected.embeddedChunks ? `<details class="panel ask-disclosure" open><summary>Ask Relay</summary>${askForm({ askId, prospects: [selected], selected: selected.id, fixedProspect: true }, "Ask Relay", true)}</details>` : '<div class="notice warning" role="status"><p>Ask Relay is available after this prospect has indexed research.</p></div>'}${inline?.content ?? ""}</div>
+<div class="ask-area">${selected.embeddedChunks && (!selected.websiteIndexStatus || selected.websiteIndexStatus === "ready") ? `<details class="panel ask-disclosure" open><summary>Ask Relay</summary>${askForm({ askId, prospects: [selected], selected: selected.id, fixedProspect: true }, "Ask Relay", true)}</details>` : '<div class="notice warning" role="status"><p>Ask Relay is available after this prospect has indexed research.</p></div>'}${inline?.content ?? ""}</div>
+<div class="notice" role="status"><p>Website research: ${indexLabel(selected)}.</p>${canResearch(selected) ? `<form method="post" action="/research-index"><input type="hidden" name="prospectId" value="${selected.id}"><p>Confirm a paid Firecrawl collection and OpenAI embedding request for ${escapeHtml(selected.website!)}.</p><button type="submit" name="confirm" value="research-index">Research &amp; Index Website</button></form>` : selected.websiteIndexStatus === "needs_review" && selected.websiteIndexHasEvidence ? `<form method="post" action="/research-index"><input type="hidden" name="prospectId" value="${selected.id}"><p>Confirm an embedding retry using saved research. Firecrawl will not run again.</p><button type="submit" name="confirm" value="research-index">Retry indexing</button></form>` : ""}</div>
 ${saved ? `<div class="notice success" role="status"><p>${saved === "created" ? "Prospect saved." : "Prospect already recorded. No duplicate was created."} Research has not started automatically.</p></div>` : ""}
 <details class="panel details"><summary>Business details</summary><dl>
 <div><dt>Website</dt><dd>${escapeHtml(selected.website ?? "Not provided")}</dd></div>
@@ -75,5 +90,5 @@ ${saved ? `<div class="notice success" role="status"><p>${saved === "created" ? 
 </dl></details>
 </section>`
     : '<section aria-label="Prospect detail"><p class="empty">Select a prospect to view details and Ask Relay.</p></section>';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${inline?.refresh ? '<meta http-equiv="refresh" content="1">' : ""}<title>Prospects · Relay</title><style>${STYLE}</style></head><body><main><nav aria-label="Main"><a href="/">Relay</a><a href="/new">New Prospect</a></nav><h1 class="dashboard-title">Prospects</h1><div class="layout"><section aria-label="Saved prospects"><h2 class="list-heading">Saved prospects</h2>${list}</section>${detail}</div></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${inline?.refresh || selected?.websiteIndexStatus === "researching" || selected?.websiteIndexStatus === "indexing" ? '<meta http-equiv="refresh" content="1">' : ""}<title>Prospects · Relay</title><style>${STYLE}</style></head><body><main><nav aria-label="Main"><a href="/">Relay</a><a href="/new">New Prospect</a></nav><h1 class="dashboard-title">Prospects</h1><div class="layout"><section aria-label="Saved prospects"><h2 class="list-heading">Saved prospects</h2>${list}</section>${detail}</div></main></body></html>`;
 }

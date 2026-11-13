@@ -256,6 +256,8 @@ export type DashboardProspect = IndexedProspect & {
   contactName: string | null;
   contactEmail: string | null;
   stage: string;
+  websiteIndexStatus?: string | null;
+  websiteIndexHasEvidence?: boolean;
 };
 
 export async function listDashboardProspects(
@@ -265,12 +267,22 @@ export async function listDashboardProspects(
     id: string; company_name: string; website: string | null;
     industry: string | null; contact_name: string | null;
     contact_email: string | null; stage: string; embedded_chunks: number;
+    website_index_status: string | null;
+    website_index_has_evidence: boolean;
   }>(
     `SELECT p.id, p.company_name, p.website, p.industry, p.contact_name,
-      p.contact_email, p.stage, count(c.id)::int AS embedded_chunks
+      p.contact_email, p.stage,
+      CASE WHEN r.website_index_status IN ('researching', 'indexing')
+        AND r.updated_at < now() - interval '30 minutes'
+        THEN 'needs_review' ELSE r.website_index_status END AS website_index_status,
+      (r.website_index_status = 'needs_review' AND r.status = 'completed'
+        AND r.evidence IS NOT NULL) AS website_index_has_evidence,
+      count(c.id)::int AS embedded_chunks
     FROM prospects p LEFT JOIN research_chunks c
       ON c.prospect_id = p.id AND c.embedding IS NOT NULL AND c.embedding_model = $1
-    GROUP BY p.id ORDER BY p.company_name, p.id`,
+    LEFT JOIN prospect_research_requests r ON r.prospect_id = p.id
+    GROUP BY p.id, r.website_index_status, r.status, r.evidence, r.updated_at
+    ORDER BY p.company_name, p.id`,
     [RESEARCH_EMBEDDING_MODEL],
   );
   return result.rows.map((row) => ({
@@ -278,6 +290,8 @@ export async function listDashboardProspects(
     industry: row.industry, contactName: row.contact_name,
     contactEmail: row.contact_email, stage: row.stage,
     embeddedChunks: row.embedded_chunks,
+    websiteIndexStatus: row.website_index_status,
+    websiteIndexHasEvidence: row.website_index_has_evidence,
   }));
 }
 
@@ -294,7 +308,9 @@ export async function listIndexedProspects(
     `SELECT p.id, p.company_name, p.website, count(*)::int AS embedded_chunks
     FROM prospects p
     JOIN research_chunks c ON c.prospect_id = p.id
+    LEFT JOIN prospect_research_requests r ON r.prospect_id = p.id
     WHERE c.embedding IS NOT NULL AND c.embedding_model = $1
+      AND (r.website_index_status IS NULL OR r.website_index_status = 'ready')
     GROUP BY p.id, p.company_name, p.website
     ORDER BY p.company_name, p.id`,
     [RESEARCH_EMBEDDING_MODEL],

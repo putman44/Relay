@@ -9,6 +9,8 @@ import { createOpenAIEmbedder } from "../src/research/openai-embeddings.js";
 import { INTAKE_UI_HOST, parseIntakeUiPort, startIntakeServer } from "../src/web/intake-server.js";
 import { createAskRelayHandler } from "../src/web/ask-relay-server.js";
 import { DASHBOARD_CSP, renderDashboard } from "../src/web/prospect-dashboard.js";
+import { researchAndIndexWebsite } from "../src/research/website-index.js";
+import { createFirecrawlScraper } from "../src/research/firecrawl-scraper.js";
 
 async function main(): Promise<void> {
   const connectionString = requireDemoDatabaseUrl(process.env.DATABASE_URL);
@@ -25,6 +27,9 @@ async function main(): Promise<void> {
         listProspects: () => listDashboardProspects(pool),
         render: renderDashboard,
         csp: DASHBOARD_CSP,
+        researchIndex: (prospectId) => researchAndIndexWebsite(prospectId, {
+          database: pool, scrape: createFirecrawlScraper(), embed: createOpenAIEmbedder(),
+        }),
         askHandler: (getServer) => createAskRelayHandler({
           listProspects: () => listIndexedProspects(pool),
           ask: (input) => askRelay(input, {

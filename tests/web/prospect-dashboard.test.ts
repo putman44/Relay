@@ -180,3 +180,51 @@ test("creating a prospect redirects to its detail without starting research", as
   assert.equal(saved.location, `/prospect?id=${SECOND}&saved=created`);
   assert.equal(created, 1);
 });
+
+test("website indexing requires a confirmed dashboard action and shows progress", async (t) => {
+  const id = "00000000-0000-4000-a000-000000000003";
+  const item: DashboardProspect = { id, companyName: "Third Co", website: "https://third.com/", industry: null, contactName: null, contactEmail: null, stage: "researching", embeddedChunks: 0, websiteIndexStatus: null };
+  let calls = 0;
+  const server = await startIntakeServer({
+    port: 0,
+    createProspect: async () => { throw new Error("unexpected"); },
+    dashboard: {
+      listProspects: async () => [item], render: renderDashboard, csp: DASHBOARD_CSP,
+      researchIndex: async () => { calls++; item.websiteIndexStatus = "researching"; },
+      askHandler: (getServer) => createAskRelayHandler({ listProspects: async () => [], ask: async () => { throw new Error("unexpected"); } }, getServer, { dashboard: true }),
+    },
+  });
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const port = (server.address() as AddressInfo).port;
+  async function send(path: string, body?: string) {
+    return new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = request({ host: "127.0.0.1", port, path, method: body === undefined ? "GET" : "POST", headers: body === undefined ? {} : { origin: `http://127.0.0.1:${port}`, "content-type": "application/x-www-form-urlencoded" } }, (res) => {
+        const chunks: Buffer[] = []; res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => resolve({ status: res.statusCode!, body: Buffer.concat(chunks).toString() }));
+      }); req.on("error", reject); req.end(body);
+    });
+  }
+  const detail = await send(`/prospect?id=${id}`);
+  assert.match(detail.body, /Research &amp; Index Website/);
+  assert.match(detail.body, /Not researched/);
+  assert.equal((await send("/research-index", new URLSearchParams({ prospectId: id }).toString())).status, 400);
+  assert.equal(calls, 0);
+  assert.equal((await send("/research-index", new URLSearchParams({ prospectId: id, confirm: "research-index" }).toString())).status, 303);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 1);
+  const active = await send(`/prospect?id=${id}`);
+  assert.match(active.body, /Researching/);
+  assert.doesNotMatch(active.body, /Research &amp; Index Website/);
+  assert.doesNotMatch(active.body, /method="post" action="\/ask"/);
+  item.websiteIndexStatus = "indexing";
+  item.embeddedChunks = 1;
+  assert.match((await send(`/prospect?id=${id}`)).body, /Indexing/);
+  assert.doesNotMatch((await send(`/prospect?id=${id}`)).body, /method="post" action="\/ask"/);
+  item.websiteIndexStatus = "needs_review";
+  item.websiteIndexHasEvidence = true;
+  assert.match((await send(`/prospect?id=${id}`)).body, /Retry indexing/);
+  item.websiteIndexStatus = "ready";
+  const ready = await send(`/prospect?id=${id}`);
+  assert.match(ready.body, /Website research: Ready/);
+  assert.match(ready.body, /method="post" action="\/ask"/);
+});
