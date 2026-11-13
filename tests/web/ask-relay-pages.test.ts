@@ -91,7 +91,7 @@ test("Every dynamic value is escaped", () => {
 
 test("A verified answer shows grouped sources with https links and their quotes", () => {
   const html = renderAskAnswer(summary, answered, next);
-  assert.match(html, /<h2>Answer<\/h2>/);
+  assert.match(html, /<details class="panel" open>\s*<summary>Latest answer<\/summary>/);
   assert.match(html, /Sources and verified quotes/);
   assert.ok(
     html.includes(
@@ -104,7 +104,7 @@ test("A verified answer shows grouped sources with https links and their quotes"
   // A non-https stored URL is shown as text, never as a link.
   assert.ok(!html.includes('href="javascript:'));
   assert.ok(html.includes("javascript:alert(1)"));
-  assert.match(html, /Retrieved by vector similarity: 2 chunks/);
+  assert.match(html, /Retrieved vector chunks: 2/);
   assert.match(html, /0\.457 · https:\/\/riverbend\.example\.com\//);
   assert.match(html, /Ask another question/);
 });
@@ -127,7 +127,7 @@ test("Insufficient evidence is stated clearly, with no sources, for each reason"
   }
   assert.doesNotMatch(
     renderAskAnswer(summary, insufficient("no_indexed_research"), next),
-    /Retrieved by vector similarity/,
+    /Retrieved vector chunks/,
   );
 });
 

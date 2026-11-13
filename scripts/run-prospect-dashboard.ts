@@ -32,7 +32,7 @@ async function main(): Promise<void> {
             embed: createOpenAIEmbedder(),
             answer: createOpenAIAnswerer(),
           }),
-        }, getServer),
+        }, getServer, { dashboard: true }),
       },
     });
     console.log(`Relay prospect dashboard at http://${INTAKE_UI_HOST}:${port}/ using local ${DEMO_DATABASE_NAME}.`);

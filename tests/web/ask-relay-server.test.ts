@@ -211,7 +211,7 @@ test("A valid question redirects to its answer page, which polls until the answe
   harness.pending[0]!.resolve(answered("Which towns do you serve?"));
   await settle();
   const done = await get(harness, `/answer?id=${ID(100)}`);
-  assert.match(done.body, /<h2>Answer<\/h2>/);
+  assert.match(done.body, /<summary>Latest answer<\/summary>/);
   assert.match(done.body, /They serve Riverbend\./);
   assert.match(done.body, /<blockquote>We serve Riverbend<\/blockquote>/);
   assert.match(done.body, /href="https:\/\/riverbend\.example\.com\/"/);

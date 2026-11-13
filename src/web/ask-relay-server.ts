@@ -20,10 +20,13 @@ import {
   ASK_QUESTION_FIELD,
   MAX_QUESTION_CHARS,
   renderAskAnswer,
+  renderAskAnswerInline,
   renderAskErrorPage,
   renderAskFailed,
+  renderAskFailedInline,
   renderAskForm,
   renderAskPending,
+  renderAskPendingInline,
   type AskSummary,
 } from "./ask-relay-pages.js";
 
@@ -62,6 +65,10 @@ type AskRun = { summary: AskSummary } & (
   | { state: "done"; result: AskRelayResult }
   | { state: "failed" }
 );
+export type InlineAskResult = { content: string; refresh: boolean };
+export type AskRelayHandler = ((req: IncomingMessage, res: ServerResponse) => Promise<void>) & {
+  inlineAnswer: (prospectId: string, askId: string) => InlineAskResult | null;
+};
 type Route = {
   method: "GET" | "POST";
   handle: (
@@ -258,7 +265,8 @@ async function readFields(
 export function createAskRelayHandler(
   dependencies: AskServerDependencies,
   getServer: () => Server,
-): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
+  options: { dashboard?: true } = {},
+): AskRelayHandler {
   const generateAskId = dependencies.generateAskId ?? randomUUID;
   const log = (event: AskServerEvent) => {
     try {
@@ -380,7 +388,9 @@ export function createAskRelayHandler(
     res.writeHead(303, {
       ...PAGE_HEADERS,
       "content-length": 0,
-      location: answerPath(askId),
+      location: options.dashboard
+        ? `/prospect?id=${encodeURIComponent(prospect.id)}&answer=${encodeURIComponent(askId)}`
+        : answerPath(askId),
     });
     res.end();
   }
@@ -483,7 +493,20 @@ export function createAskRelayHandler(
     await route.handle(req, res, host);
   }
 
-  return handle;
+  return Object.assign(handle, {
+    inlineAnswer(prospectId: string, askId: string): InlineAskResult | null {
+      const run = UUID.test(askId) ? runs.get(askId) : undefined;
+      if (!run || run.summary.prospect.id !== prospectId) return null;
+      if (run.state === "running")
+        return { content: renderAskPendingInline(run.summary), refresh: true };
+      return {
+        content: run.state === "done"
+          ? renderAskAnswerInline(run.summary, run.result)
+          : renderAskFailedInline(run.summary),
+        refresh: false,
+      };
+    },
+  });
 }
 
 function createAskRelayServer(dependencies: AskServerDependencies): Server {

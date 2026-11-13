@@ -76,9 +76,11 @@ export type IntakeServerDependencies = {
   research?: IntakeResearchDependencies;
   dashboard?: {
     listProspects: () => Promise<DashboardProspectView[]>;
-    render: (prospects: readonly DashboardProspectView[], selected: DashboardProspectView | undefined, askId: string, saved: "created" | "existing" | null) => string;
+    render: (prospects: readonly DashboardProspectView[], selected: DashboardProspectView | undefined, askId: string, saved: "created" | "existing" | null, inline?: { content: string; refresh: boolean } | null) => string;
     csp: string;
-    askHandler: (getServer: () => Server) => (req: IncomingMessage, res: ServerResponse) => Promise<void>;
+    askHandler: (getServer: () => Server) => ((req: IncomingMessage, res: ServerResponse) => Promise<void>) & {
+      inlineAnswer: (prospectId: string, askId: string) => { content: string; refresh: boolean } | null;
+    };
   };
   generateRequestId?: () => string;
   log?: (event: IntakeServerEvent) => void;
@@ -530,7 +532,10 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
       const selected = prospects.find((p) => p.id === id);
       if (!selected) return sendError(res, 404, "Prospect unavailable", "This prospect was not found.");
       const saved = query.get("saved");
-      sendPage(res, 200, dependencies.dashboard!.render(prospects, selected, randomUUID(), saved === "created" || saved === "existing" ? saved : null), { "content-security-policy": dependencies.dashboard!.csp });
+      const answerId = query.get("answer")?.toLowerCase();
+      const inline = answerId === undefined ? null : askHandler?.inlineAnswer(id, answerId);
+      if (answerId !== undefined && !inline) return sendError(res, 404, "Answer unavailable", "This answer is not available for this prospect.");
+      sendPage(res, 200, dependencies.dashboard!.render(prospects, selected, randomUUID(), saved === "created" || saved === "existing" ? saved : null, inline), { "content-security-policy": dependencies.dashboard!.csp });
     }}],
   ] : [];
   const routes = new Map<string, Route>([
