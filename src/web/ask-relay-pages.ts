@@ -78,7 +78,7 @@ const prospectLabel = (prospect: IndexedProspect) =>
   `${prospect.companyName} (${prospect.embeddedChunks} chunks)`;
 
 // Source URLs come from stored research; only https URLs become links.
-function sourceLink(url: string): string {
+export function sourceLink(url: string): string {
   let https = false;
   try {
     https = new URL(url).protocol === "https:";

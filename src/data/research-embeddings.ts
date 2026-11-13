@@ -377,3 +377,54 @@ export async function searchResearchChunks(
     similarity: 1 - row.distance,
   }));
 }
+
+export type KeywordResearchChunk = {
+  id: string;
+  researchDocumentId: string;
+  sourceUrl: string;
+  chunkIndex: number;
+  content: string;
+  rank: number;
+};
+
+// PostgreSQL full-text match over one prospect's embedded chunks, complementing
+// the vector search: it finds chunks that use the exact words (such as "emergency")
+// even when the chunk's embedding is dominated by other page content. The query is
+// websearch syntax written by Relay code, never user or website text. Reads stored
+// chunks only: no provider call, no schema change, scoped to one prospect.
+export async function searchResearchChunksByKeyword(
+  input: { prospectId: string; query: string; limit: number },
+  database: Database,
+): Promise<KeywordResearchChunk[]> {
+  const prospectId = prospectUuid(input.prospectId);
+  if (!input.query.trim() || input.query.length > 500)
+    throw new Error("Keyword query must be 1 to 500 characters.");
+  if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 20)
+    throw new Error("Search limit must be between 1 and 20.");
+  const result = await database.query<{
+    id: string;
+    research_document_id: string;
+    source_url: string;
+    chunk_index: number;
+    content: string;
+    rank: number;
+  }>(
+    `SELECT c.id, c.research_document_id, c.source_url, c.chunk_index, c.content,
+      ts_rank_cd(to_tsvector('english', c.content), q.query) AS rank
+    FROM research_chunks c,
+      websearch_to_tsquery('english', $2) AS q(query)
+    WHERE c.prospect_id = $1 AND c.embedding IS NOT NULL AND c.embedding_model = $3
+      AND to_tsvector('english', c.content) @@ q.query
+    ORDER BY rank DESC, c.source_url, c.chunk_index
+    LIMIT $4`,
+    [prospectId, input.query, RESEARCH_EMBEDDING_MODEL, input.limit],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    researchDocumentId: row.research_document_id,
+    sourceUrl: row.source_url,
+    chunkIndex: row.chunk_index,
+    content: row.content,
+    rank: Number(row.rank),
+  }));
+}

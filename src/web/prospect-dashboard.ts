@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import type { DashboardProspect } from "../data/research-embeddings.js";
+import type { AssessmentHistory } from "../data/lead-assessments.js";
 import { askForm, ASK_STYLE } from "./ask-relay-pages.js";
+import { assessmentGenerating, ASSESSMENT_STYLE, renderAssessmentSection } from "./assessment-pages.js";
 import { escapeHtml } from "./intake-pages.js";
 import { safeResearchUrl } from "../research/research-evidence.js";
 
-const STYLE = `${ASK_STYLE}
+const STYLE = `${ASK_STYLE}${ASSESSMENT_STYLE}
 main{max-width:76rem;padding-top:1.5rem}
 nav{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding-bottom:1rem;border-bottom:1px solid var(--line)}
 nav a{font-weight:600;text-decoration:none}
@@ -70,6 +72,7 @@ export function renderDashboard(
   askId: string,
   saved: "created" | "existing" | null,
   inline: { content: string; refresh: boolean } | null = null,
+  assessment: AssessmentHistory | null = null,
 ): string {
   const list = prospects.length
     ? `<ul class="prospects">${prospects.map((p) => `<li><a href="/prospect?id=${encodeURIComponent(p.id)}"${p.id === selected?.id ? ' aria-current="page"' : ""}>${escapeHtml(p.companyName)}<small>${escapeHtml(statusLabel(p))} · ${p.embeddedChunks ? "Ask Relay ready" : "Research not indexed"}</small></a></li>`).join("")}</ul>`
@@ -79,6 +82,7 @@ export function renderDashboard(
 <h2 class="prospect-heading">${escapeHtml(selected.companyName)}</h2>
 <div class="ask-area">${selected.embeddedChunks && (!selected.websiteIndexStatus || selected.websiteIndexStatus === "ready") ? `<details class="panel ask-disclosure" open><summary>Ask Relay</summary>${askForm({ askId, prospects: [selected], selected: selected.id, fixedProspect: true }, "Ask Relay", true)}</details>` : '<div class="notice warning" role="status"><p>Ask Relay is available after this prospect has indexed research.</p></div>'}${inline?.content ?? ""}</div>
 <div class="notice" role="status"><p>Website research: ${indexLabel(selected)}.</p>${canResearch(selected) ? `<form method="post" action="/research-index"><input type="hidden" name="prospectId" value="${selected.id}"><p>Confirm a paid Firecrawl collection and OpenAI embedding request for ${escapeHtml(selected.website!)}.</p><button type="submit" name="confirm" value="research-index">Research &amp; Index Website</button></form>` : selected.websiteIndexStatus === "needs_review" && selected.websiteIndexHasEvidence ? `<form method="post" action="/research-index"><input type="hidden" name="prospectId" value="${selected.id}"><p>Confirm an embedding retry using saved research. Firecrawl will not run again.</p><button type="submit" name="confirm" value="research-index">Retry indexing</button></form>` : ""}</div>
+${renderAssessmentSection(selected, assessment)}
 ${saved ? `<div class="notice success" role="status"><p>${saved === "created" ? "Prospect saved." : "Prospect already recorded. No duplicate was created."} Research has not started automatically.</p></div>` : ""}
 <details class="panel details"><summary>Business details</summary><dl>
 <div><dt>Website</dt><dd>${escapeHtml(selected.website ?? "Not provided")}</dd></div>
@@ -90,5 +94,5 @@ ${saved ? `<div class="notice success" role="status"><p>${saved === "created" ? 
 </dl></details>
 </section>`
     : '<section aria-label="Prospect detail"><p class="empty">Select a prospect to view details and Ask Relay.</p></section>';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${inline?.refresh || selected?.websiteIndexStatus === "researching" || selected?.websiteIndexStatus === "indexing" ? '<meta http-equiv="refresh" content="1">' : ""}<title>Prospects · Relay</title><style>${STYLE}</style></head><body><main><nav aria-label="Main"><a href="/">Relay</a><a href="/new">New Prospect</a></nav><h1 class="dashboard-title">Prospects</h1><div class="layout"><section aria-label="Saved prospects"><h2 class="list-heading">Saved prospects</h2>${list}</section>${detail}</div></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${inline?.refresh || assessmentGenerating(assessment) || selected?.websiteIndexStatus === "researching" || selected?.websiteIndexStatus === "indexing" ? '<meta http-equiv="refresh" content="1">' : ""}<title>Prospects · Relay</title><style>${STYLE}</style></head><body><main><nav aria-label="Main"><a href="/">Relay</a><a href="/new">New Prospect</a></nav><h1 class="dashboard-title">Prospects</h1><div class="layout"><section aria-label="Saved prospects"><h2 class="list-heading">Saved prospects</h2>${list}</section>${detail}</div></main></body></html>`;
 }

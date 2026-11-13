@@ -42,7 +42,7 @@ export type CitationFailure = {
   sourceContext: string;
 };
 
-function exact(
+export function exact(
   value: unknown,
   keys: string[],
 ): value is Record<string, unknown> {
@@ -55,7 +55,7 @@ function exact(
   );
 }
 
-function text(value: unknown, limit: number): value is string {
+export function text(value: unknown, limit: number): value is string {
   return (
     typeof value === "string" &&
     !!value.trim() &&

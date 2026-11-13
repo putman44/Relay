@@ -51,6 +51,8 @@ export type IntakeServerEvent =
   | { event: "research_requested"; prospectId: string }
   | { event: "research_finished"; prospectId: string; status: string }
   | { event: "research_stopped"; prospectId: string; error: string }
+  | { event: "assessment_requested" | "assessment_finished"; prospectId: string }
+  | { event: "assessment_stopped"; prospectId: string; error: string }
   | { event: "request_failed"; error: string };
 
 export type IntakeResearchDependencies = {
@@ -68,6 +70,7 @@ type DashboardProspectView = {
   contactEmail: string | null;
   stage: string;
   embeddedChunks: number;
+  websiteIndexStatus?: string | null;
 };
 
 export type IntakeServerDependencies = {
@@ -76,12 +79,17 @@ export type IntakeServerDependencies = {
   research?: IntakeResearchDependencies;
   dashboard?: {
     listProspects: () => Promise<DashboardProspectView[]>;
-    render: (prospects: readonly DashboardProspectView[], selected: DashboardProspectView | undefined, askId: string, saved: "created" | "existing" | null, inline?: { content: string; refresh: boolean } | null) => string;
+    // The assessment value is opaque here: this module must not import assessment code.
+    // A method signature, so a renderer that expects the concrete history type is assignable.
+    render(prospects: readonly DashboardProspectView[], selected: DashboardProspectView | undefined, askId: string, saved: "created" | "existing" | null, inline?: { content: string; refresh: boolean } | null, assessment?: unknown): string;
     csp: string;
     askHandler: (getServer: () => Server) => ((req: IncomingMessage, res: ServerResponse) => Promise<void>) & {
       inlineAnswer: (prospectId: string, askId: string) => { content: string; refresh: boolean } | null;
     };
     researchIndex?: (prospectId: string) => Promise<void>;
+    // Without these the dashboard shows no assessment and serves no assessment route.
+    loadAssessment?: (prospectId: string) => Promise<unknown>;
+    generateAssessment?: (prospectId: string) => Promise<unknown>;
   };
   generateRequestId?: () => string;
   log?: (event: IntakeServerEvent) => void;
@@ -113,6 +121,10 @@ const RESEARCH_FORM_FIELDS = new Set<string>([
   RESEARCH_PROSPECT_FIELD,
   INTAKE_CONFIRM_FIELD,
 ]);
+// Literals, not imports from assessment-pages: the intake-only process must not
+// load assessment code. A web test pins them to the exported constants.
+const ASSESSMENT_PATH = "/assessment";
+const ASSESSMENT_CONFIRM_VALUE = "generate-assessment";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export function parseIntakeUiPort(value: string | undefined): number {
@@ -523,6 +535,7 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
   const askHandler = dependencies.dashboard
     ? dependencies.dashboard.askHandler(() => server)
     : undefined;
+  const assessmentRuns = new Set<string>();
   const dashboardRoutes: [string, Route][] = dependencies.dashboard ? [
     ["/research-index", { method: "POST", handle: async (req, res, host) => {
       if (!dependencies.dashboard?.researchIndex) return sendError(res, 404, "Unavailable", "Website indexing is unavailable.");
@@ -540,6 +553,32 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
       res.writeHead(303, { ...PAGE_HEADERS, "content-length": 0, location: `/prospect?id=${encodeURIComponent(id)}` });
       res.end();
     }}],
+    [ASSESSMENT_PATH, { method: "POST", handle: async (req, res, host) => {
+      const dashboard = dependencies.dashboard!;
+      if (!dashboard.generateAssessment) return sendError(res, 404, "Unavailable", "Assessment generation is unavailable.");
+      const fields = await readFields(req, res, host, RESEARCH_FORM_FIELDS);
+      if (!fields) return;
+      const id = fields.get(RESEARCH_PROSPECT_FIELD)?.toLowerCase() ?? "";
+      if (fields.get(INTAKE_CONFIRM_FIELD) !== ASSESSMENT_CONFIRM_VALUE || !UUID.test(id))
+        return sendError(res, 400, "Confirmation required", "An assessment is generated only from the Generate Assessment button. Nothing was generated.");
+      const prospect = (await dashboard.listProspects()).find((p) => p.id === id);
+      if (!prospect || !prospect.embeddedChunks || (prospect.websiteIndexStatus && prospect.websiteIndexStatus !== "ready"))
+        return sendError(res, 409, "Assessment unavailable", "This prospect has no indexed research to assess. Nothing was generated.");
+      // The durable reservation rejects a duplicate paid run; this only avoids a second launch from this process.
+      if (!assessmentRuns.has(id)) {
+        assessmentRuns.add(id);
+        log({ event: "assessment_requested", prospectId: id });
+        void Promise.resolve()
+          .then(() => dashboard.generateAssessment!(id))
+          .then(
+            () => log({ event: "assessment_finished", prospectId: id }),
+            (error: unknown) => log({ event: "assessment_stopped", prospectId: id, error: errorKind(error) }),
+          )
+          .finally(() => assessmentRuns.delete(id));
+      }
+      res.writeHead(303, { ...PAGE_HEADERS, "content-length": 0, location: `/prospect?id=${encodeURIComponent(id)}` });
+      res.end();
+    }}],
     ["/new", { method: "GET", handle: (_req, res) => sendPage(res, 200, renderIntakeForm({ requestId: generateRequestId() })) }],
     ["/prospect", { method: "GET", handle: async (req, res) => {
       const query = new URLSearchParams((req.url ?? "").split("?", 2)[1] ?? "");
@@ -552,7 +591,8 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
       const answerId = query.get("answer")?.toLowerCase();
       const inline = answerId === undefined ? null : askHandler?.inlineAnswer(id, answerId);
       if (answerId !== undefined && !inline) return sendError(res, 404, "Answer unavailable", "This answer is not available for this prospect.");
-      sendPage(res, 200, dependencies.dashboard!.render(prospects, selected, randomUUID(), saved === "created" || saved === "existing" ? saved : null, inline), { "content-security-policy": dependencies.dashboard!.csp });
+      const assessment = dependencies.dashboard!.loadAssessment ? await dependencies.dashboard!.loadAssessment(id) : null;
+      sendPage(res, 200, dependencies.dashboard!.render(prospects, selected, randomUUID(), saved === "created" || saved === "existing" ? saved : null, inline, assessment), { "content-security-policy": dependencies.dashboard!.csp });
     }}],
   ] : [];
   const routes = new Map<string, Route>([
