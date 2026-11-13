@@ -130,6 +130,9 @@ test("The form page lists only indexed prospects and is served with strict heade
   assert.equal(reply.headers["cache-control"], "no-store");
   assert.equal(reply.headers["x-content-type-options"], "nosniff");
   assert.equal(reply.headers["x-frame-options"], "DENY");
+  // Browsers send `Origin: null` on form posts from a "no-referrer" page, which
+  // would block every real submission; "same-origin" keeps the real origin.
+  assert.equal(reply.headers["referrer-policy"], "same-origin");
   assert.match(String(reply.headers["content-security-policy"]), /^default-src 'none'; style-src 'sha256-/);
   assert.match(reply.body, /Riverbend Comfort \(3 chunks\)/);
   assert.match(reply.body, /Oak Hollow Counseling \(2 chunks\)/);
@@ -159,6 +162,7 @@ test("Only same-origin, well-formed, confirmed form posts can ask", async (t) =>
   const cases: [number, Promise<Reply>][] = [
     [403, post(harness, form(), { origin: "https://evil.example.com" })],
     [403, post(harness, form(), { origin: undefined })],
+    [403, post(harness, form(), { origin: "null" })],
     [403, post(harness, form(), { "sec-fetch-site": "cross-site" })],
     [415, post(harness, form(), { "content-type": "application/json" })],
     [413, post(harness, form({ question: "x".repeat(MAX_ASK_FORM_BYTES) }))],

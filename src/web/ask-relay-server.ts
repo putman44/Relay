@@ -74,7 +74,9 @@ type Route = {
 const PAGE_HEADERS: OutgoingHttpHeaders = {
   "cache-control": "no-store",
   "content-security-policy": ASK_PAGE_CSP,
-  "referrer-policy": "no-referrer",
+  // Not "no-referrer": under it, browsers send `Origin: null` on form posts,
+  // which the same-origin check rightly refuses.
+  "referrer-policy": "same-origin",
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
 };
