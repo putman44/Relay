@@ -59,10 +59,27 @@ export type IntakeResearchDependencies = {
   getRequest: (prospectId: string) => Promise<ResearchSummary | null>;
 };
 
+type DashboardProspectView = {
+  id: string;
+  companyName: string;
+  website: string | null;
+  industry: string | null;
+  contactName: string | null;
+  contactEmail: string | null;
+  stage: string;
+  embeddedChunks: number;
+};
+
 export type IntakeServerDependencies = {
   createProspect: (input: ProspectIntakeInput) => Promise<ProspectIntakeResult>;
   // Without this the UI offers no research action and serves no research routes.
   research?: IntakeResearchDependencies;
+  dashboard?: {
+    listProspects: () => Promise<DashboardProspectView[]>;
+    render: (prospects: readonly DashboardProspectView[], selected: DashboardProspectView | undefined, askId: string, saved: "created" | "existing" | null) => string;
+    csp: string;
+    askHandler: (getServer: () => Server) => (req: IncomingMessage, res: ServerResponse) => Promise<void>;
+  };
   generateRequestId?: () => string;
   log?: (event: IntakeServerEvent) => void;
 };
@@ -342,6 +359,15 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
       requestId: result.requestId,
       prospectId: result.prospectId,
     });
+    if (dependencies.dashboard) {
+      res.writeHead(303, {
+        ...PAGE_HEADERS,
+        "content-length": 0,
+        location: `/prospect?id=${encodeURIComponent(result.prospectId)}&saved=${result.created ? "created" : "existing"}`,
+      });
+      res.end();
+      return;
+    }
     // Only a prospect still awaiting research is offered the action; the start recheck is durable.
     const offer: ResearchOffer = !dependencies.research
       ? "none"
@@ -491,16 +517,35 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
     ];
   }
 
+  const askHandler = dependencies.dashboard
+    ? dependencies.dashboard.askHandler(() => server)
+    : undefined;
+  const dashboardRoutes: [string, Route][] = dependencies.dashboard ? [
+    ["/new", { method: "GET", handle: (_req, res) => sendPage(res, 200, renderIntakeForm({ requestId: generateRequestId() })) }],
+    ["/prospect", { method: "GET", handle: async (req, res) => {
+      const query = new URLSearchParams((req.url ?? "").split("?", 2)[1] ?? "");
+      const id = query.get("id")?.toLowerCase() ?? "";
+      if (!UUID.test(id)) return sendError(res, 400, "Prospect unavailable", "This link does not identify a prospect.");
+      const prospects = await dependencies.dashboard!.listProspects();
+      const selected = prospects.find((p) => p.id === id);
+      if (!selected) return sendError(res, 404, "Prospect unavailable", "This prospect was not found.");
+      const saved = query.get("saved");
+      sendPage(res, 200, dependencies.dashboard!.render(prospects, selected, randomUUID(), saved === "created" || saved === "existing" ? saved : null), { "content-security-policy": dependencies.dashboard!.csp });
+    }}],
+  ] : [];
   const routes = new Map<string, Route>([
     [
       "/",
       {
         method: "GET",
-        handle: (_req, res) =>
+        handle: async (_req, res) =>
           sendPage(
             res,
             200,
-            renderIntakeForm({ requestId: generateRequestId() }),
+            dependencies.dashboard
+              ? dependencies.dashboard.render(await dependencies.dashboard.listProspects(), undefined, randomUUID(), null)
+              : renderIntakeForm({ requestId: generateRequestId() }),
+            dependencies.dashboard ? { "content-security-policy": dependencies.dashboard.csp } : {},
           ),
       },
     ],
@@ -569,6 +614,7 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
       },
     ],
     ...(dependencies.research ? researchRoutes(dependencies.research) : []),
+    ...dashboardRoutes,
   ]);
 
   async function handle(
@@ -583,6 +629,11 @@ function createIntakeServer(dependencies: IntakeServerDependencies): Server {
         "Request rejected",
         "Relay accepts requests only at its loopback address. Nothing was created.",
       );
+      return;
+    }
+    const path = (req.url ?? "").split("?", 1)[0] ?? "";
+    if (askHandler && (path === "/ask" || path === "/answer")) {
+      await askHandler(req, res);
       return;
     }
     // Exact origin-form paths only; absolute-form targets are not routed.

@@ -251,6 +251,36 @@ export type IndexedProspect = {
   embeddedChunks: number;
 };
 
+export type DashboardProspect = IndexedProspect & {
+  industry: string | null;
+  contactName: string | null;
+  contactEmail: string | null;
+  stage: string;
+};
+
+export async function listDashboardProspects(
+  database: Database,
+): Promise<DashboardProspect[]> {
+  const result = await database.query<{
+    id: string; company_name: string; website: string | null;
+    industry: string | null; contact_name: string | null;
+    contact_email: string | null; stage: string; embedded_chunks: number;
+  }>(
+    `SELECT p.id, p.company_name, p.website, p.industry, p.contact_name,
+      p.contact_email, p.stage, count(c.id)::int AS embedded_chunks
+    FROM prospects p LEFT JOIN research_chunks c
+      ON c.prospect_id = p.id AND c.embedding IS NOT NULL AND c.embedding_model = $1
+    GROUP BY p.id ORDER BY p.company_name, p.id`,
+    [RESEARCH_EMBEDDING_MODEL],
+  );
+  return result.rows.map((row) => ({
+    id: row.id, companyName: row.company_name, website: row.website,
+    industry: row.industry, contactName: row.contact_name,
+    contactEmail: row.contact_email, stage: row.stage,
+    embeddedChunks: row.embedded_chunks,
+  }));
+}
+
 // Prospects that Ask Relay can answer for: those with embedded research.
 export async function listIndexedProspects(
   database: Database,

@@ -10,6 +10,7 @@ import {
 } from "../../src/data/canonical-data.js";
 import {
   indexProspectResearch,
+  listDashboardProspects,
   listIndexedProspects,
   previewProspectResearch,
   searchResearchChunks,
@@ -416,6 +417,11 @@ test("Research embeddings: indexing, prospect-scoped search, and grounded answer
     });
     assert.ok(byId.has(counseling.prospectId));
     assert.equal(byId.has(unindexed.prospectId), false);
+    const dashboard = await listDashboardProspects(database);
+    const dashboardById = new Map(dashboard.map((prospect) => [prospect.id, prospect]));
+    assert.equal(dashboardById.get(unindexed.prospectId)?.embeddedChunks, 0);
+    assert.equal(dashboardById.get(comfort.prospectId)?.embeddedChunks, comfortChunks.length);
+    assert.equal(dashboardById.get(unindexed.prospectId)?.companyName, "Fixture https://unindexed.example.com/");
     // A prospect whose only chunk has no embedding is not offered either.
     assert.ok(
       listed.every((prospect) => prospect.website !== "https://conflict.example.com/"),

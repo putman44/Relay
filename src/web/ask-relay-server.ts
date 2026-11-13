@@ -255,7 +255,10 @@ async function readFields(
   return fields;
 }
 
-function createAskRelayServer(dependencies: AskServerDependencies): Server {
+export function createAskRelayHandler(
+  dependencies: AskServerDependencies,
+  getServer: () => Server,
+): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   const generateAskId = dependencies.generateAskId ?? randomUUID;
   const log = (event: AskServerEvent) => {
     try {
@@ -452,7 +455,7 @@ function createAskRelayServer(dependencies: AskServerDependencies): Server {
     res: ServerResponse,
   ): Promise<void> {
     const host = req.headers.host?.toLowerCase();
-    if (!host || !allowedHosts(server).has(host)) {
+    if (!host || !allowedHosts(getServer()).has(host)) {
       sendError(
         res,
         403,
@@ -480,9 +483,13 @@ function createAskRelayServer(dependencies: AskServerDependencies): Server {
     await route.handle(req, res, host);
   }
 
+  return handle;
+}
+
+function createAskRelayServer(dependencies: AskServerDependencies): Server {
   const server = createServer((req, res) => {
     handle(req, res).catch((error: unknown) => {
-      log({ event: "request_failed", error: errorKind(error) });
+      try { dependencies.log?.({ event: "request_failed", error: errorKind(error) }); } catch { /* logging is best effort */ }
       if (res.headersSent || res.destroyed) {
         res.destroy();
         return;
@@ -495,6 +502,7 @@ function createAskRelayServer(dependencies: AskServerDependencies): Server {
       );
     });
   });
+  const handle = createAskRelayHandler(dependencies, () => server);
   server.headersTimeout = 10_000;
   server.requestTimeout = 30_000;
   return server;

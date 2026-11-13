@@ -31,6 +31,7 @@ blockquote{margin:.5rem 0 0;padding:.1rem 0 .1rem .8rem;border-left:3px solid va
 summary{cursor:pointer;font-weight:600}
 .retrieved{margin:.75rem 0 0;color:var(--muted);font-size:.9rem;overflow-wrap:anywhere}
 `;
+export const ASK_STYLE = STYLE;
 
 // Only this exact inline stylesheet is permitted: no scripts, frames, or external loads.
 export const ASK_PAGE_CSP = [
@@ -85,7 +86,7 @@ function sourceLink(url: string): string {
     : escapeHtml(url);
 }
 
-function askForm(view: AskFormView, heading: string): string {
+export function askForm(view: AskFormView, heading: string): string {
   if (!view.prospects.length)
     return `<div class="notice warning" role="status">
 <p><strong>No prospect has embedded research yet.</strong></p>

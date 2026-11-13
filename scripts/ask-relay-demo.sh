@@ -8,6 +8,7 @@
 #   index --confirm-embeddings           embed every demo site (paid OpenAI)
 #   ask SITE --confirm-openai "QUESTION" answer from SITE's research (paid OpenAI)
 #   ui                                   browser UI at http://127.0.0.1:4311/
+#   dashboard                            unified intake and Ask Relay demo at http://127.0.0.1:4310/
 #                                        (each question asked there is paid OpenAI)
 #   down                                 remove the demo container and volume
 #   reset                                down, then up
@@ -153,7 +154,7 @@ down() {
 }
 
 command="${1:-}"
-[[ -n "$command" ]] || fail "Usage: $0 up|status|preview|index|ask|ui|down|reset (see header)."
+[[ -n "$command" ]] || fail "Usage: $0 up|status|preview|index|ask|ui|dashboard|down|reset (see header)."
 shift
 require_local_docker
 
@@ -194,6 +195,11 @@ case "$command" in
     [[ $# -eq 0 ]] || fail "Run: $0 ui (set RELAY_ASK_UI_PORT to change the port)"
     require_running
     pinned node --import tsx scripts/run-ask-relay-ui.ts
+    ;;
+  dashboard)
+    [[ $# -eq 0 ]] || fail "Run: $0 dashboard"
+    require_running
+    pinned node --import tsx scripts/run-prospect-dashboard.ts
     ;;
   down) down ;;
   reset)
