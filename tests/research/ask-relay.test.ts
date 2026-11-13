@@ -163,6 +163,55 @@ test("Citations verify only when every quote appears in its cited excerpt", () =
   assert.equal(citationsVerified(draft([{ source: "S1", quote: "we" }]), sources), false);
 });
 
+test("Rendered Markdown link labels verify without accepting invented words or URLs", () => {
+  const sources = [{
+    id: "S1",
+    sourceUrl: "https://a.example.com/",
+    text: "## Service areas\n- [North District](https://a.example.com/north)\n- [South District](https://a.example.com/south)",
+  }, {
+    id: "S2",
+    sourceUrl: "https://b.example.com/",
+    text: "Open daily.",
+  }];
+  const draft = (source: string, quote: string) => ({
+    status: "answered" as const,
+    answer: "They serve two areas.",
+    citations: [{ source, quote }],
+  });
+
+  assert.equal(citationsVerified(draft("S1", "- [North District]\n- [South District]"), sources), true);
+  assert.equal(citationsVerified(draft("S1", "- North District\n- South District"), sources), true);
+  assert.equal(citationsVerified(draft("S1", "[North District](https://a.example.com/north)"), sources), true);
+  assert.equal(citationsVerified(draft("S1", "- [North District]\n- [West District]"), sources), false);
+  assert.equal(citationsVerified(draft("S1", "[North District](https://invented.example.com/)"), sources), false);
+  assert.equal(citationsVerified(draft("S2", "- [North District]\n- [South District]"), sources), false);
+});
+
+test("Opt-in citation diagnostics identify the failed quote without changing the hold", () => {
+  const sources = [
+    { id: "S1", sourceUrl: "https://a.example.com/", text: "Book a [free consultation](https://a.example.com/book) today." },
+    { id: "S2", sourceUrl: "https://b.example.com/", text: "Open daily." },
+  ];
+  const draft = {
+    status: "answered" as const,
+    answer: "Answer.",
+    citations: [
+      { source: "S2", quote: "Open daily" },
+      { source: "S1", quote: "Book a free consultation tomorrow." },
+    ],
+  };
+  const failures: Parameters<NonNullable<Parameters<typeof citationsVerified>[2]>>[0][] = [];
+  assert.equal(citationsVerified(draft, sources, (failure) => failures.push(failure)), false);
+  assert.deepEqual(failures, [{
+    citationIndex: 1,
+    sourceId: "S1",
+    reason: "quote_not_in_source",
+    quote: "Book a free consultation tomorrow.",
+    sourceContext: "book a [free consultation](https://a.example.com/book) today.",
+  }]);
+  assert.equal(citationsVerified(draft, sources, () => { throw new Error("logging failed"); }), false);
+});
+
 test("Ask Relay commands require exact arguments and explicit OpenAI confirmation", () => {
   assert.deepEqual(parseAskRelayArgs(["preview", "--prospect", prospectId]), {
     action: "preview",

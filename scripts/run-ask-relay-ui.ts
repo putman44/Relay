@@ -10,7 +10,7 @@ import {
   requireDemoDatabaseUrl,
 } from "../src/data/demo-database.js";
 import { listIndexedProspects } from "../src/data/research-embeddings.js";
-import { askRelay } from "../src/research/ask-relay.js";
+import { askRelay, type CitationFailure } from "../src/research/ask-relay.js";
 import { createOpenAIAnswerer } from "../src/research/openai-answerer.js";
 import { createOpenAIEmbedder } from "../src/research/openai-embeddings.js";
 import {
@@ -21,6 +21,15 @@ import {
 
 function log(record: Record<string, unknown>): void {
   console.log(JSON.stringify({ service: "ask-relay-ui", ...record }));
+}
+
+function citationDiagnosticLogger(
+  enabled: boolean,
+  logger: typeof log,
+): ((failure: CitationFailure) => void) | undefined {
+  return enabled
+    ? (failure) => logger({ event: "citation_verification_failed", ...failure })
+    : undefined;
 }
 
 async function main(): Promise<void> {
@@ -49,7 +58,15 @@ async function main(): Promise<void> {
     server = await startAskRelayServer({
       port,
       listProspects: () => listIndexedProspects(pool),
-      ask: (input) => askRelay(input, { database: pool, embed, answer }),
+      ask: (input) => askRelay(input, {
+        database: pool,
+        embed,
+        answer,
+        onCitationFailure: citationDiagnosticLogger(
+          process.env.RELAY_ASK_CITATION_DIAGNOSTICS === "true",
+          log,
+        ),
+      }),
       log,
     });
   } catch (error) {

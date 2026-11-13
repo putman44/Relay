@@ -34,6 +34,14 @@ type DraftAnswer = {
   citations: { source: string; quote: string }[];
 };
 
+export type CitationFailure = {
+  citationIndex: number;
+  sourceId: string | null;
+  reason: "no_citations" | "quote_too_short" | "quote_not_in_source";
+  quote: string;
+  sourceContext: string;
+};
+
 function exact(
   value: unknown,
   keys: string[],
@@ -96,22 +104,70 @@ function normalized(value: string): string {
     .toLowerCase();
 }
 
+// Only remove destinations from complete inline website links in the source.
+// The quote is never rewritten, so an invented URL cannot be accepted.
+const INLINE_WEBSITE_LINK = /\[([^\[\]\r\n]+)\]\(https?:\/\/[^\s()]+\)/gi;
+
+function quoteInSource(quote: string, sourceText: string): boolean {
+  const raw = normalized(sourceText);
+  if (raw.includes(quote)) return true;
+  const labelsWithBrackets = sourceText.replace(
+    INLINE_WEBSITE_LINK,
+    (_link, label: string) => `[${label}]`,
+  );
+  return (
+    normalized(labelsWithBrackets).includes(quote) ||
+    normalized(sourceText.replace(INLINE_WEBSITE_LINK, "$1")).includes(quote)
+  );
+}
+
 // An answer is verified only when it cites at least one excerpt and every
-// quote appears in the excerpt it cites.
+// quote appears in the cited excerpt's raw text or rendered website link labels.
 export function citationsVerified(
   draft: DraftAnswer,
   sources: readonly AnswerSource[],
+  onFailure?: (failure: CitationFailure) => void,
 ): boolean {
-  return (
-    draft.citations.length > 0 &&
-    draft.citations.every((citation) => {
-      const source = sources.find((item) => item.id === citation.source);
-      const quote = normalized(citation.quote);
-      return (
-        !!source && quote.length >= 4 && normalized(source.text).includes(quote)
-      );
-    })
-  );
+  const report = (failure: CitationFailure) => {
+    try {
+      onFailure?.(failure);
+    } catch {
+      // Diagnostics cannot change the result.
+    }
+  };
+  if (!draft.citations.length) {
+    report({
+      citationIndex: -1,
+      sourceId: null,
+      reason: "no_citations",
+      quote: "",
+      sourceContext: "",
+    });
+    return false;
+  }
+  let verified = true;
+  draft.citations.forEach((citation, citationIndex) => {
+    const source = sources.find((item) => item.id === citation.source);
+    const quote = normalized(citation.quote);
+    if (source && quote.length >= 4 && quoteInSource(quote, source.text)) return;
+    verified = false;
+    const sourceText = source ? normalized(source.text) : "";
+    const anchor = quote
+      .split(/\W+/)
+      .find((word) => word.length >= 4 && sourceText.includes(word));
+    const position = anchor ? sourceText.indexOf(anchor) : -1;
+    report({
+      citationIndex,
+      sourceId: citation.source,
+      reason: quote.length < 4 ? "quote_too_short" : "quote_not_in_source",
+      quote: citation.quote,
+      sourceContext:
+        position < 0
+          ? ""
+          : sourceText.slice(Math.max(0, position - 80), position + 160),
+    });
+  });
+  return verified;
 }
 
 export async function askRelay(
@@ -121,6 +177,7 @@ export async function askRelay(
     embed: Embedder;
     answer: Answerer;
     limit?: number;
+    onCitationFailure?: ((failure: CitationFailure) => void) | undefined;
   },
 ): Promise<AskRelayResult> {
   const question = input.question?.trim();
@@ -174,7 +231,7 @@ export async function askRelay(
   );
   if (draft.status === "insufficient_evidence")
     return insufficient("model_reported", draft.answer, retrieved);
-  if (!citationsVerified(draft, sources))
+  if (!citationsVerified(draft, sources, deps.onCitationFailure))
     return insufficient("unverified_citations", UNVERIFIED_ANSWER, retrieved);
 
   return {

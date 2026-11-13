@@ -10,7 +10,7 @@ research_documents (saved Firecrawl pages)
   -> research_chunks.embedding (pgvector, migration 015)
   -> question embedding -> cosine search over ONE prospect's chunks (top 6)
   -> OpenAI answer that may cite only the retrieved chunks
-  -> every citation quote checked verbatim against its chunk
+  -> every citation quote checked against its chunk, including rendered link labels
   -> answer with source URLs, or "Not enough evidence"
 ```
 
@@ -101,10 +101,16 @@ loading pages costs nothing. Set `RELAY_ASK_UI_PORT` to use another port.
 - Resubmitting the same form, for example with a double-click, does not ask
   twice. At most two questions can be in progress at once.
 
+For a future authorized question, set `RELAY_ASK_CITATION_DIAGNOSTICS=true`
+when starting the UI to log only failed citation checks. Each diagnostic names
+the citation index and source ID, the rejected quote, and a short matching
+context from that source when available. It does not log the question, full
+retrieved chunks, or the OpenAI request. Leave the flag unset for normal use.
+
 ### Reading the output
 
 An answered question prints the answer, then `Sources:` with each cited
-excerpt's URL and verbatim quote, then the retrieved chunks with their cosine
+excerpt's URL and verified quote, then the retrieved chunks with their cosine
 similarity. Source URLs come from the stored chunks, never from the model.
 
 `Answer: Not enough evidence.` appears when:
