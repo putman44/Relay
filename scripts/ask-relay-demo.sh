@@ -7,6 +7,8 @@
 #   preview [SITE]                       chunk counts; no OpenAI calls
 #   index --confirm-embeddings           embed every demo site (paid OpenAI)
 #   ask SITE --confirm-openai "QUESTION" answer from SITE's research (paid OpenAI)
+#   ui                                   browser UI at http://127.0.0.1:4311/
+#                                        (each question asked there is paid OpenAI)
 #   down                                 remove the demo container and volume
 #   reset                                down, then up
 #
@@ -151,7 +153,7 @@ down() {
 }
 
 command="${1:-}"
-[[ -n "$command" ]] || fail "Usage: $0 up|status|preview|index|ask|down|reset (see header)."
+[[ -n "$command" ]] || fail "Usage: $0 up|status|preview|index|ask|ui|down|reset (see header)."
 shift
 require_local_docker
 
@@ -187,6 +189,11 @@ case "$command" in
     prospect="$(site_prospect "$1")"
     pinned node --import tsx scripts/ask-relay.ts ask \
       --prospect "$prospect" --confirm-openai "$3"
+    ;;
+  ui)
+    [[ $# -eq 0 ]] || fail "Run: $0 ui (set RELAY_ASK_UI_PORT to change the port)"
+    require_running
+    pinned node --import tsx scripts/run-ask-relay-ui.ts
     ;;
   down) down ;;
   reset)

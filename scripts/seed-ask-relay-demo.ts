@@ -8,7 +8,8 @@
 // and every demo prospect is created with cold outreach blocked.
 import "dotenv/config";
 import { readFile } from "node:fs/promises";
-import { Client, Pool } from "pg";
+import { Pool } from "pg";
+import { requireDemoDatabaseUrl } from "../src/data/demo-database.js";
 import { saveResearchPages } from "../src/data/save-research-pages.js";
 import type { ResearchPage } from "../src/research/research-evidence.js";
 
@@ -32,29 +33,6 @@ const DEMO_SITES: Record<
     industry: "Software",
   },
 };
-
-const localHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
-
-function requireDemoDatabase(value: string | undefined): string {
-  let url: URL, client: Client;
-  try {
-    url = new URL(value ?? "");
-    client = new Client({ connectionString: value });
-  } catch {
-    throw new Error("DATABASE_URL must be the local relay_demo database.");
-  }
-  if (
-    !["postgres:", "postgresql:"].includes(url.protocol) ||
-    !localHosts.has(url.hostname) ||
-    decodeURIComponent(url.pathname) !== "/relay_demo" ||
-    !localHosts.has(client.host) ||
-    client.database !== "relay_demo"
-  )
-    throw new Error(
-      "Demo seeding only writes to a loopback database named relay_demo.",
-    );
-  return value!;
-}
 
 async function seedSite(site: string, pool: Pool) {
   const demo = DEMO_SITES[site]!;
@@ -139,7 +117,7 @@ async function main() {
       `Use seed, or id SITE where SITE is one of: ${Object.keys(DEMO_SITES).join(", ")}.`,
     );
   const pool = new Pool({
-    connectionString: requireDemoDatabase(process.env.DATABASE_URL),
+    connectionString: requireDemoDatabaseUrl(process.env.DATABASE_URL),
   });
   try {
     for (const name of Object.keys(DEMO_SITES)) await seedSite(name, pool);

@@ -244,6 +244,39 @@ export async function indexProspectResearch(
   return result;
 }
 
+export type IndexedProspect = {
+  id: string;
+  companyName: string;
+  website: string | null;
+  embeddedChunks: number;
+};
+
+// Prospects that Ask Relay can answer for: those with embedded research.
+export async function listIndexedProspects(
+  database: Database,
+): Promise<IndexedProspect[]> {
+  const result = await database.query<{
+    id: string;
+    company_name: string;
+    website: string | null;
+    embedded_chunks: number;
+  }>(
+    `SELECT p.id, p.company_name, p.website, count(*)::int AS embedded_chunks
+    FROM prospects p
+    JOIN research_chunks c ON c.prospect_id = p.id
+    WHERE c.embedding IS NOT NULL AND c.embedding_model = $1
+    GROUP BY p.id, p.company_name, p.website
+    ORDER BY p.company_name, p.id`,
+    [RESEARCH_EMBEDDING_MODEL],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    companyName: row.company_name,
+    website: row.website,
+    embeddedChunks: row.embedded_chunks,
+  }));
+}
+
 export async function countEmbeddedResearchChunks(
   prospectId: string,
   database: Database,

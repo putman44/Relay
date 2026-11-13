@@ -10,6 +10,7 @@ import {
 } from "../../src/data/canonical-data.js";
 import {
   indexProspectResearch,
+  listIndexedProspects,
   previewProspectResearch,
   searchResearchChunks,
 } from "../../src/data/research-embeddings.js";
@@ -397,6 +398,27 @@ test("Research embeddings: indexing, prospect-scoped search, and grounded answer
         },
       ),
       /expected schema/,
+    );
+  });
+
+  await t.test("only prospects with embedded research are offered to Ask Relay", async () => {
+    const unindexed = await prospectWithPage(
+      "https://unindexed.example.com/",
+      "# Not indexed yet",
+    );
+    const listed = await listIndexedProspects(database);
+    const byId = new Map(listed.map((prospect) => [prospect.id, prospect]));
+    assert.deepEqual(byId.get(comfort.prospectId), {
+      id: comfort.prospectId,
+      companyName: "Fixture https://riverbend.example.com/",
+      website: "https://riverbend.example.com/",
+      embeddedChunks: comfortChunks.length,
+    });
+    assert.ok(byId.has(counseling.prospectId));
+    assert.equal(byId.has(unindexed.prospectId), false);
+    // A prospect whose only chunk has no embedding is not offered either.
+    assert.ok(
+      listed.every((prospect) => prospect.website !== "https://conflict.example.com/"),
     );
   });
 });

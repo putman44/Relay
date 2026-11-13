@@ -78,6 +78,29 @@ The sites are `hvac`, `counseling`, and `relay`. Steps 1–4 are needed only onc
 per database; after that, run step 5 with any question. Nothing has to be
 re-seeded or edited between questions.
 
+### Browser UI
+
+```bash
+scripts/ask-relay-demo.sh ui      # then open http://127.0.0.1:4311/  (Ctrl+C to stop)
+```
+
+The page lists the prospects that have embedded research, takes one question,
+and shows the answer with its source URLs and verified quotes, or "Not enough
+evidence". A pending answer page refreshes itself every second until the answer
+is ready. Each question asked costs one OpenAI embedding and one answer call;
+loading pages costs nothing. Set `RELAY_ASK_UI_PORT` to use another port.
+
+- It uses the same `askRelay()` engine as the command line; nothing about
+  retrieval, embeddings, or citation checks differs.
+- It listens on `127.0.0.1` only, accepts questions only from its own page, uses
+  no JavaScript, and keeps recent answers in memory only (a restart forgets
+  them; nothing is written to the database).
+- It connects only to the local `relay_demo` database. The launcher refuses any
+  other database, including the one in `.env`, before connecting, then checks
+  `current_database()` again. Start it with the wrapper command above.
+- Resubmitting the same form, for example with a double-click, does not ask
+  twice. At most two questions can be in progress at once.
+
 ### Reading the output
 
 An answered question prints the answer, then `Sources:` with each cited

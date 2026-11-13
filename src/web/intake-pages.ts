@@ -87,6 +87,8 @@ ol{padding-left:1.25rem}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;overflow-wrap:anywhere}
 a{color:var(--accent)}
 `;
+// Shared with the Ask Relay demo pages so both operator tools look the same.
+export const INTAKE_STYLE = STYLE;
 
 // The policy permits only this exact inline stylesheet: no scripts, frames, or external loads.
 export const INTAKE_PAGE_CSP = [

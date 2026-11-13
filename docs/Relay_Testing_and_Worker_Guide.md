@@ -1208,9 +1208,12 @@ answers only from verified citations. See `docs/Ask_Relay_Demo.md`.
 | --- | --- |
 | `tests/research/research-chunker.test.ts` | Deterministic chunks that are exact source slices, heading and paragraph boundaries, image-only blocks and thematic breaks excluded, size limits, oversized-block splitting without losing words or splitting surrogate pairs |
 | `tests/research/ask-relay.test.ts` | Embedding and answer request shapes with fake transports, response validation (count, order, 1536 finite dimensions), strict answer schema limited to retrieved source ids, verbatim citation checks, explicit `--confirm-*` arguments, and output that lists only verified source URLs |
-| `tests/data/research-embeddings.test.ts` | Migration 015 vector constraints, embed-once indexing with reuse on re-run, no partial writes after a failed embedding call, filling earlier unembedded chunks without duplicates, fail-closed conflicts with stored chunks, prospect-scoped search and answers that never return another prospect's chunks, no provider calls without embedded research, and withheld answers with fabricated citations |
+| `tests/data/research-embeddings.test.ts` | Migration 015 vector constraints, embed-once indexing with reuse on re-run, no partial writes after a failed embedding call, filling earlier unembedded chunks without duplicates, fail-closed conflicts with stored chunks, prospect-scoped search and answers that never return another prospect's chunks, no provider calls without embedded research, withheld answers with fabricated citations, and offering the demo UI only prospects with embedded research |
+| `tests/web/ask-relay-pages.test.ts` | Demo UI pages: exact-stylesheet CSP with no scripts or handlers, escaping of every dynamic value, grouped sources with https-only links, clear insufficient-evidence states, a self-refreshing pending page, and fixed-text failures |
+| `tests/web/ask-relay-server.test.ts` | Demo UI routes: Host allowlist, same-origin strict form posts, explicit Ask Relay confirmation, size limits, question and prospect validation without provider calls, redirect-and-poll answers, duplicate submissions that never ask twice, bounded questions in flight, and failures that hide error details |
+| `tests/web/ask-relay-ui-boundary.test.ts` | The demo database guard (loopback `relay_demo` only, including `?host=` overrides), launcher refusal of `.env`, Neon-style, and `relay_test` databases before connecting, and a runtime import set with no `.env` database pool, Gmail, Drive, Firecrawl, or worker code |
 
-The two `tests/research` files need no database. The `tests/data` file writes
-through `RELAY_DRAFT_TEST_DATABASE_URL` and requires the guarded disposable
-`relay_test` configuration; `npm run verify` provides it. All three use fake
-providers and make no OpenAI calls.
+The `tests/research` and `tests/web` files need no database. The `tests/data`
+file writes through `RELAY_DRAFT_TEST_DATABASE_URL` and requires the guarded
+disposable `relay_test` configuration; `npm run verify` provides it. All of them
+use fake providers and make no OpenAI calls.
