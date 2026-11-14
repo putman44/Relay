@@ -5,6 +5,7 @@ import { askForm, ASK_STYLE } from "./ask-relay-pages.js";
 import { assessmentGenerating, ASSESSMENT_STYLE, renderAssessmentSection, renderIntelligenceOverview } from "./assessment-pages.js";
 import { escapeHtml } from "./intake-pages.js";
 import { safeResearchUrl } from "../research/research-evidence.js";
+import { parseWebsiteDiagnostic } from "../research/website-diagnostic.js";
 
 const STYLE = `${ASK_STYLE}${ASSESSMENT_STYLE}
 main{max-width:76rem;padding-top:1.5rem}
@@ -68,6 +69,25 @@ function indexLabel(prospect: DashboardProspect): string {
   return "Not researched";
 }
 
+function researchExplanation(prospect: DashboardProspect): string {
+  if (indexLabel(prospect) !== "Needs review") return "";
+  const diagnostic = parseWebsiteDiagnostic(prospect.websiteResearchError);
+  const messages = {
+    request_not_sent: "The provider request was not sent. Review the research setup before starting collection.",
+    provider_failed: "Firecrawl returned a failed response. Review the provider record before another collection.",
+    provider_uncertain: "Firecrawl's outcome is uncertain. Inspect provider activity before another collection.",
+    response_invalid: "Firecrawl responded, but its content or source could not be verified. Inspect the provider response before another collection.",
+    persistence_failed: "Website collection returned, but saving the research failed. Inspect the database checkpoint before any recovery.",
+    embedding_failed: "Saved research could not be fully indexed. Inspect the saved documents and embeddings before retrying indexing.",
+  };
+  const message = diagnostic ? messages[diagnostic.kind] : prospect.websiteResearchStatus === "needs_reconciliation"
+    ? "Website collection outcome is uncertain. Inspect Firecrawl activity before another collection."
+    : "Research needs inspection before it can be used.";
+  const pages = prospect.websiteSavedDocuments === 0 ? " No pages were saved." : "";
+  const id = diagnostic?.requestId ?? prospect.websiteResearchRequestId;
+  return `<p>${escapeHtml(message + pages)}</p>${id ? `<p class="hint">Research request ${escapeHtml(id)}${diagnostic ? ` · ${escapeHtml(diagnostic.stage)} · ${escapeHtml(diagnostic.timestamp)}` : ""}${diagnostic?.providerRequestId ? ` · Provider request ${escapeHtml(diagnostic.providerRequestId)}` : ""}${diagnostic?.httpStatus ? ` · HTTP ${diagnostic.httpStatus}` : ""}</p>` : ""}`;
+}
+
 export function renderDashboard(
   prospects: readonly DashboardProspect[],
   selected: DashboardProspect | undefined,
@@ -84,7 +104,7 @@ export function renderDashboard(
 <h2 class="prospect-heading">${escapeHtml(selected.companyName)}</h2>
 ${renderIntelligenceOverview(selected.companyName, assessment)}
 ${saved ? `<div class="notice success" role="status"><p>${saved === "created" ? "Prospect saved." : "Prospect already recorded. No duplicate was created."} Research has not started automatically.</p></div>` : ""}
-<div class="notice" role="status"><p>Website research: ${indexLabel(selected)}${selected.embeddedChunks ? ` · ${selected.embeddedChunks} indexed chunks` : ""}.</p>${canResearch(selected) ? `<form method="post" action="/research-index"><input type="hidden" name="prospectId" value="${selected.id}"><p>Confirm a paid Firecrawl collection and OpenAI embedding request for ${escapeHtml(selected.website!)}.</p><button type="submit" name="confirm" value="research-index">Research &amp; Index Website</button></form>` : selected.websiteIndexStatus === "needs_review" && selected.websiteIndexHasEvidence ? `<form method="post" action="/research-index"><input type="hidden" name="prospectId" value="${selected.id}"><p>Confirm an embedding retry using saved research. Firecrawl will not run again.</p><button type="submit" name="confirm" value="research-index">Retry indexing</button></form>` : ""}</div>
+<div class="notice${indexLabel(selected) === "Needs review" ? " warning" : ""}" role="status"><p>Website research: ${indexLabel(selected)}${selected.embeddedChunks ? ` · ${selected.embeddedChunks} indexed chunks` : ""}.</p>${researchExplanation(selected)}${canResearch(selected) ? `<form method="post" action="/research-index"><input type="hidden" name="prospectId" value="${selected.id}"><p>Confirm a paid Firecrawl collection and OpenAI embedding request for ${escapeHtml(selected.website!)}.</p><button type="submit" name="confirm" value="research-index">Research &amp; Index Website</button></form>` : selected.websiteIndexStatus === "needs_review" && selected.websiteIndexHasEvidence ? `<form method="post" action="/research-index"><input type="hidden" name="prospectId" value="${selected.id}"><p>Confirm an embedding retry using saved research. Firecrawl will not run again.</p><button type="submit" name="confirm" value="research-index">Retry indexing</button></form>` : ""}</div>
 <div class="ask-area">${selected.embeddedChunks && (!selected.websiteIndexStatus || selected.websiteIndexStatus === "ready") ? `<details class="panel ask-disclosure" open><summary>Ask Relay</summary>${askForm({ askId, prospects: [selected], selected: selected.id, fixedProspect: true }, "Ask Relay", true)}</details>` : '<div class="notice warning" role="status"><p>Ask Relay is available after this prospect has indexed research.</p></div>'}${inline?.content ?? ""}</div>
 ${renderAssessmentSection(selected, assessment)}
 <details class="panel details"><summary>Business details</summary><dl>

@@ -15,6 +15,35 @@ const prospects: DashboardProspect[] = [
   { id: SECOND, companyName: "Second Co", website: null, industry: null, contactName: null, contactEmail: null, stage: "researching", embeddedChunks: 0 },
 ];
 
+test("held collection explains Rafa-style uncertainty without offering a retry", () => {
+  const held: DashboardProspect = { ...prospects[1]!, website: "https://rafasautorepair.com/", websiteIndexStatus: "needs_review",
+    websiteResearchStatus: "needs_reconciliation", websiteResearchRequestId: "6f431004-8b53-4b5a-99e0-bf5f88b25cee",
+    websiteResearchError: "Website collection outcome uncertain; inspect before retry.", websiteSavedDocuments: 0 };
+  const html = renderDashboard([held], held, REQUEST, null);
+  assert.match(html, /No pages were saved/);
+  assert.match(html, /Website collection outcome is uncertain/);
+  assert.match(html, /6f431004-8b53-4b5a-99e0-bf5f88b25cee/);
+  assert.doesNotMatch(html, /Retry indexing|Research &amp; Index Website/);
+});
+
+test("structured holds show sanitized stage and provider correlation", () => {
+  for (const [kind, phrase] of [
+    ["request_not_sent", "request was not sent"], ["provider_failed", "failed response"],
+    ["provider_uncertain", "outcome is uncertain"], ["response_invalid", "could not be verified"],
+    ["persistence_failed", "saving the research failed"], ["embedding_failed", "fully indexed"],
+  ] as const) {
+    const held: DashboardProspect = { ...prospects[1]!, websiteIndexStatus: "needs_review", websiteSavedDocuments: 0,
+      websiteResearchStatus: "needs_reconciliation", websiteResearchError: JSON.stringify({ version: 1, kind,
+        stage: kind === "embedding_failed" ? "embedding" : kind === "persistence_failed" ? "persistence" : "collection",
+        requestId: FIRST, timestamp: "2026-11-14T00:02:55.000Z", providerRequestId: "fc_123", httpStatus: 422 }) };
+    const html = renderDashboard([held], held, REQUEST, null);
+    assert.ok(html.includes(phrase), kind);
+    assert.match(html, /Provider request fc_123/);
+    assert.match(html, /HTTP 422/);
+    assert.doesNotMatch(html, /Retry indexing/);
+  }
+});
+
 test("dashboard lists and selects prospects, gates missing research, and scopes Ask Relay", async (t) => {
   const asks: string[] = [];
   const server = await startIntakeServer({

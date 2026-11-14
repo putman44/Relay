@@ -11,6 +11,7 @@
     "dev": "bash scripts/dev.sh serve",
     "dev:init": "bash scripts/dev.sh init",
     "dev:status": "bash scripts/dev.sh status",
+    "website:recovery": "tsx scripts/website-recovery.ts",
     "prospect:add": "tsx scripts/add-prospect.ts",
     "intake:ui": "tsx scripts/run-intake-ui.ts",
     "draft:outreach": "tsx scripts/create-outreach-draft.ts",

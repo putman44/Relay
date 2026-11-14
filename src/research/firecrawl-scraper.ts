@@ -4,10 +4,31 @@ import {
   type PageScraper,
 } from "./research-evidence.js";
 
+export class FirecrawlScrapeError extends Error {
+  constructor(
+    public readonly kind: "request_not_sent" | "provider_failed" | "provider_uncertain" | "response_invalid",
+    public readonly httpStatus?: number,
+    public readonly providerRequestId?: string,
+  ) {
+    super({
+      request_not_sent: "Research request was not sent.",
+      provider_failed: "Research scrape failed.",
+      provider_uncertain: "Research scrape outcome is uncertain.",
+      response_invalid: "Research scrape provenance or content is invalid.",
+    }[kind]);
+    this.name = "FirecrawlScrapeError";
+  }
+}
+
 type Transport = (
   url: string,
   init: RequestInit,
-) => Promise<Pick<Response, "ok" | "text">>;
+) => Promise<Pick<Response, "ok" | "text"> & Partial<Pick<Response, "status" | "headers">>>;
+
+function providerId(headers: Headers | undefined): string | undefined {
+  const value = headers?.get("x-request-id") ?? headers?.get("request-id");
+  return value && /^[a-zA-Z0-9_-]{1,100}$/.test(value) ? value : undefined;
+}
 
 export function createFirecrawlScraper(
   key = process.env.FIRECRAWL_API_KEY,
@@ -15,8 +36,11 @@ export function createFirecrawlScraper(
 ): PageScraper {
   if (!key?.trim()) throw new Error("FIRECRAWL_API_KEY is required.");
   return async (rawUrl) => {
-    const url = safeResearchUrl(rawUrl);
-    const response = await transport("https://api.firecrawl.dev/v2/scrape", {
+    let url: string;
+    try { url = safeResearchUrl(rawUrl); }
+    catch { throw new FirecrawlScrapeError("request_not_sent"); }
+    let response: Awaited<ReturnType<Transport>>;
+    try { response = await transport("https://api.firecrawl.dev/v2/scrape", {
       method: "POST",
       redirect: "error",
       signal: AbortSignal.timeout(45000),
@@ -30,12 +54,15 @@ export function createFirecrawlScraper(
         onlyMainContent: true,
         blockAds: true,
       }),
-    });
-    if (!response.ok) throw new Error("Research scrape failed.");
-    const body = await response.text();
+    }); } catch { throw new FirecrawlScrapeError("provider_uncertain"); }
+    const id = providerId(response.headers);
+    if (!response.ok) throw new FirecrawlScrapeError("provider_failed", response.status, id);
+    let body: string;
+    try { body = await response.text(); }
+    catch { throw new FirecrawlScrapeError("provider_uncertain", response.status, id); }
     if (Buffer.byteLength(body) > 250000)
-      throw new Error("Research scrape response is too large.");
-    const payload = JSON.parse(body) as {
+      throw new FirecrawlScrapeError("response_invalid", response.status, id);
+    let payload: {
       success?: unknown;
       data?: {
         markdown?: unknown;
@@ -43,6 +70,8 @@ export function createFirecrawlScraper(
         metadata?: { sourceURL?: unknown; statusCode?: unknown; url?: unknown };
       };
     };
+    try { payload = JSON.parse(body); }
+    catch { throw new FirecrawlScrapeError("response_invalid", response.status, id); }
     const data = payload.data;
     const sourceUrl =
       typeof data?.metadata?.sourceURL === "string"
@@ -68,7 +97,7 @@ export function createFirecrawlScraper(
       statusCode < 200 ||
       statusCode >= 300
     ) {
-      throw new Error("Research scrape provenance or content is invalid.");
+      throw new FirecrawlScrapeError("response_invalid", response.status, id);
     }
     return {
       url,

@@ -587,6 +587,17 @@ test("Firecrawl adapter accepts only a successful matching source", async () => 
   );
 });
 
+test("Firecrawl adapter distinguishes unsent, known failure, uncertain, and unusable responses", async () => {
+  const { FirecrawlScrapeError } = await import("../../src/research/firecrawl-scraper.js");
+  const check = async (scraper: ReturnType<typeof createFirecrawlScraper>, url: string, kind: string) => {
+    await assert.rejects(scraper(url), (error: unknown) => error instanceof FirecrawlScrapeError && error.kind === kind);
+  };
+  await check(createFirecrawlScraper("fake-key", async () => { throw new Error("unexpected transport"); }), "http://unsafe.example.com/", "request_not_sent");
+  await check(createFirecrawlScraper("fake-key", async () => ({ ok: false, status: 429, headers: new Headers({ "x-request-id": "fc_123" }), text: async () => "secret body" })), root, "provider_failed");
+  await check(createFirecrawlScraper("fake-key", async () => { throw new Error("timeout with token secret"); }), root, "provider_uncertain");
+  await check(createFirecrawlScraper("fake-key", async () => ({ ok: true, status: 200, text: async () => "not-json" })), root, "response_invalid");
+});
+
 test("OpenAI research adapter is tool-free and requires one completed text result", async () => {
   const researcher = createOpenAIResearcher(
     { OPENAI_API_KEY: "fake-key", RELAY_RESEARCH_MODEL: "chosen-model" },

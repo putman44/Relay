@@ -419,7 +419,7 @@ export async function getResearchRequest(
   return (
     (
       await database.query<ResearchRequest>(
-        "SELECT * FROM prospect_research_requests WHERE prospect_id = $1",
+        "SELECT * FROM prospect_research_requests WHERE prospect_id = $1 ORDER BY created_at, id LIMIT 1",
         [prospectId],
       )
     ).rows[0] ?? null

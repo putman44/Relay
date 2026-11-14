@@ -57,7 +57,7 @@ export async function currentEvidenceVersion(
 ): Promise<EvidenceVersion | null> {
   const request = (
     await database.query<{ id: string; website_index_status: string | null }>(
-      "SELECT id, website_index_status FROM prospect_research_requests WHERE prospect_id = $1",
+      "SELECT id, website_index_status FROM prospect_research_requests WHERE prospect_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
       [prospectId],
     )
   ).rows[0];
