@@ -8,6 +8,7 @@ import { FirecrawlScrapeError } from "./firecrawl-scraper.js";
 import type { WebsiteDiagnostic, WebsiteDiagnosticKind } from "./website-diagnostic.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isUuid = (value: unknown): value is string => typeof value === "string" && UUID.test(value);
 type Job = { id: string; status: string; website_index_status: string; evidence: unknown; input_snapshot: { website?: unknown } };
 type Reservation = { id: string; website: string; collect: boolean };
 type Dependencies = { database: Pool; scrape: PageScraper; embed: Embedder };

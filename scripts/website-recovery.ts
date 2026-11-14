@@ -3,13 +3,11 @@ import { Pool } from "pg";
 import { requireDevDatabaseUrl } from "../src/data/dev-database.js";
 import { createFirecrawlScraper } from "../src/research/firecrawl-scraper.js";
 import { createOpenAIEmbedder } from "../src/research/openai-embeddings.js";
-import { approveWebsiteRecovery, startApprovedWebsiteRecovery } from "../src/research/website-index.js";
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { approveWebsiteRecovery, isUuid, startApprovedWebsiteRecovery } from "../src/research/website-index.js";
 
 async function main(args: string[]): Promise<void> {
   const [action, prospectId, requestId, ...rest] = args;
-  if (!UUID.test(prospectId ?? "") || !UUID.test(requestId ?? ""))
+  if (!isUuid(prospectId) || !isUuid(requestId))
     throw new Error("Exact prospect and request IDs required.");
   if (process.env.RELAY_DASHBOARD_DATABASE !== "relay_dev")
     throw new Error("Website recovery is restricted to relay_dev.");
