@@ -52,8 +52,8 @@ test("dashboard lists and selects prospects, gates missing research, and scopes 
   assert.equal(home.status, 200);
   assert.match(home.body, /First &amp; Co/);
   assert.match(home.body, /Second Co/);
-  assert.match(home.body, /Research not indexed/);
-  assert.match(home.body, /Research not started/);
+  assert.match(home.body, /Website research: Ready · 2 indexed chunks/);
+  assert.match(home.body, /Website research: Not researched/);
   assert.doesNotMatch(home.body, />researching</);
   assert.match(String(home.headers["content-security-policy"]), /^default-src 'none'; style-src 'sha256-/);
   const first = await send(`/prospect?id=${FIRST}`);
@@ -61,6 +61,7 @@ test("dashboard lists and selects prospects, gates missing research, and scopes 
   assert.doesNotMatch(first.body, /<select[^>]*name="prospectId"/);
   assert.match(first.body, /<details class="panel ask-disclosure" open><summary>Ask Relay<\/summary>/);
   assert.match(first.body, /<details class="panel details"><summary>Business details<\/summary>/);
+  assert.match(first.body, /<dt>Legacy outreach stage<\/dt><dd>Not started<\/dd>/);
   assert.ok(first.body.indexOf("<summary>Ask Relay</summary>") < first.body.indexOf("<summary>Business details</summary>"));
   const second = await send(`/prospect?id=${SECOND}`);
   assert.match(second.body, /Ask Relay is available after/);

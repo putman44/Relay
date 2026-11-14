@@ -25,6 +25,13 @@ export const ASSESSMENT_STYLE = `
 .status-line{display:flex;flex-wrap:wrap;gap:.25rem 1rem;color:var(--muted);font-size:.9rem}
 .grade{display:inline-block;min-width:2rem;padding:.05rem .5rem;margin-right:.4rem;border:1px solid var(--line);border-radius:.35rem;font-weight:700;text-align:center}
 .tag{color:var(--muted);font-size:.8rem;font-weight:600}
+.intelligence{margin-top:1rem;border-color:var(--accent)}
+.intelligence h3{margin:.9rem 0 .3rem;font-size:.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.intelligence p{margin:.3rem 0;line-height:1.5}
+.intelligence ol{margin:.35rem 0;padding-left:1.3rem}
+.intelligence li{margin:.25rem 0}
+.intelligence .status-line{margin-top:.8rem}
+.assessment-body blockquote{max-width:68ch;line-height:1.55;color:var(--text);background:rgba(255,255,255,.025);padding:.45rem .7rem}
 `;
 
 type StatusView = { label: string; tone: "ok" | "warning" | "error" | "plain" };
@@ -157,11 +164,11 @@ ${
     : '<p class="hint">No verified observations from the retrieved excerpts.</p>'
 }
 <h4>Unknown</h4>
-${bullets(category.unknowns.map((item) => item.text)) || '<p class="hint">Nothing listed.</p>'}
+${bullets(category.unknowns.map((item) => item.text)) || '<p class="hint">No additional unknowns recorded in this category.</p>'}
 <h4>Possible Relay opportunities (hypotheses)</h4>
-${bullets(category.hypotheses) || '<p class="hint">Nothing listed.</p>'}
+${bullets(category.hypotheses) || '<p class="hint">No grounded opportunity hypothesis in this category.</p>'}
 <h4>Discovery questions</h4>
-${bullets(category.discoveryQuestions) || '<p class="hint">Nothing listed.</p>'}
+${bullets(category.discoveryQuestions) || '<p class="hint">No category-specific discovery question recorded.</p>'}
 </details>`,
     )
     .join("\n")}
@@ -242,7 +249,7 @@ export function renderAssessmentSection(
             : "The last assessment run did not finish cleanly. It was held for review and was not retried."
         }</p></div>`
       : "";
-  return `<details class="panel assessment"${view.records.length ? " open" : ""}><summary>Lead Intake Assessment</summary>
+  return `<details class="panel assessment"><summary>${result ? "Detailed Assessment" : "Lead Intake Assessment"}</summary>
 <div class="assessment-body">
 <p class="status-line"><span>Status: <strong>${escapeHtml(status.label)}</strong></span>${shown ? `<span>Generated ${escapeHtml(date(shown.createdAt))}</span>` : ""}</p>
 <p class="hint">Built only from this prospect's saved website research. Verified observations carry exact quotes; what the website does not say is listed as unknown, never as a shortcoming. Opportunities are hypotheses to test in discovery.</p>
@@ -250,4 +257,30 @@ ${outdated}${held}${generateAction(prospect.id, view, indexed)}
 ${shown && !result ? UNDISPLAYABLE : ""}${result ? safeRender(result) : ""}
 ${historyList(view.records)}
 </div></details>`;
+}
+
+export function renderIntelligenceOverview(
+  companyName: string,
+  history: AssessmentHistory | null,
+): string {
+  const view = history ?? { current: null, records: [] };
+  const shown = view.records.find((record) => record.status === "completed");
+  if (!shown || !isResult(shown.result)) return "";
+  try {
+    const result = shown.result;
+    const opportunities = result.topOpportunities.length
+      ? `<h3>Opportunities to investigate</h3><ol>${result.topOpportunities.map((item) => `<li>${escapeHtml(item.title)}</li>`).join("")}</ol>`
+      : "";
+    return `<section class="panel intelligence" aria-label="Prospect intelligence overview">
+<h2>Prospect intelligence</h2>
+<p><strong>${escapeHtml(companyName)}</strong> · Preliminary fit <span class="grade">${escapeHtml(result.fit.grade)}</span></p>
+<p class="status-line"><span>Assessment: <strong>${escapeHtml(statusView(view).label)}</strong></span><span>Generated ${escapeHtml(date(shown.createdAt))}</span></p>
+<h3>Business intake</h3><p>${result.summary ? escapeHtml(result.summary.statement) : "No business summary could be verified from the saved excerpts."}</p>
+${opportunities}
+${result.primaryDiscoveryQuestion ? `<h3>Start discovery with</h3><p>${escapeHtml(result.primaryDiscoveryQuestion)}</p>` : ""}
+<p class="hint">Based on saved website evidence. Opportunities are hypotheses; open Detailed Assessment for sources, unknowns, and fit rationale.</p>
+</section>`;
+  } catch {
+    return "";
+  }
 }

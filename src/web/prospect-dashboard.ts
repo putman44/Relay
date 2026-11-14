@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { DashboardProspect } from "../data/research-embeddings.js";
 import type { AssessmentHistory } from "../data/lead-assessments.js";
 import { askForm, ASK_STYLE } from "./ask-relay-pages.js";
-import { assessmentGenerating, ASSESSMENT_STYLE, renderAssessmentSection } from "./assessment-pages.js";
+import { assessmentGenerating, ASSESSMENT_STYLE, renderAssessmentSection, renderIntelligenceOverview } from "./assessment-pages.js";
 import { escapeHtml } from "./intake-pages.js";
 import { safeResearchUrl } from "../research/research-evidence.js";
 
@@ -16,10 +16,12 @@ nav a{font-weight:600;text-decoration:none}
 .list-heading{margin:0 0 .5rem;color:var(--muted);font-size:.8rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
 .prospects{list-style:none;margin:0;padding:0}
 .prospects li{border-bottom:1px solid var(--line)}
-.prospects a{display:block;padding:.7rem .6rem;text-decoration:none;color:var(--text);border-radius:.35rem;overflow-wrap:anywhere}
+.prospects a{display:block;min-width:0;padding:.7rem .6rem;text-decoration:none;color:var(--text);border-radius:.35rem;overflow-wrap:anywhere;word-break:break-word}
 .prospects a:hover,.prospects a[aria-current=page]{background:var(--panel)}
 .prospects a[aria-current=page]{font-weight:700;color:var(--accent)}
 .prospects small{display:block;margin-top:.1rem;color:var(--muted);font-size:.8rem;font-weight:400}
+.prospects .name{display:block;line-height:1.35}
+.prospects .site{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:.76rem;font-weight:400}
 .prospect-heading{margin:0;font-size:clamp(1.5rem,2.5vw,2rem);line-height:1.2;overflow-wrap:anywhere}
 .ask-area>.panel{margin-top:1rem}
 .ask-disclosure form{margin-top:1rem}
@@ -39,7 +41,7 @@ export const DASHBOARD_CSP = [
 ].join("; ");
 
 const STAGE_LABELS: Record<string, string> = {
-  researching: "Research not started",
+  researching: "Not started",
   research_in_progress: "Research in progress",
   needs_contact: "Contact needed",
   research_review: "Research needs review",
@@ -75,22 +77,23 @@ export function renderDashboard(
   assessment: AssessmentHistory | null = null,
 ): string {
   const list = prospects.length
-    ? `<ul class="prospects">${prospects.map((p) => `<li><a href="/prospect?id=${encodeURIComponent(p.id)}"${p.id === selected?.id ? ' aria-current="page"' : ""}>${escapeHtml(p.companyName)}<small>${escapeHtml(statusLabel(p))} · ${p.embeddedChunks ? "Ask Relay ready" : "Research not indexed"}</small></a></li>`).join("")}</ul>`
+    ? `<ul class="prospects">${prospects.map((p) => `<li><a href="/prospect?id=${encodeURIComponent(p.id)}"${p.id === selected?.id ? ' aria-current="page"' : ""}><span class="name">${escapeHtml(p.companyName)}</span>${p.website ? `<span class="site" title="${escapeHtml(p.website)}">${escapeHtml(p.website)}</span>` : ""}<small>Website research: ${escapeHtml(indexLabel(p))}${p.embeddedChunks ? ` · ${p.embeddedChunks} indexed chunks` : ""}</small></a></li>`).join("")}</ul>`
     : '<p class="empty">No saved prospects yet.</p>';
   const detail = selected
     ? `<section aria-label="Prospect detail">
 <h2 class="prospect-heading">${escapeHtml(selected.companyName)}</h2>
-<div class="ask-area">${selected.embeddedChunks && (!selected.websiteIndexStatus || selected.websiteIndexStatus === "ready") ? `<details class="panel ask-disclosure" open><summary>Ask Relay</summary>${askForm({ askId, prospects: [selected], selected: selected.id, fixedProspect: true }, "Ask Relay", true)}</details>` : '<div class="notice warning" role="status"><p>Ask Relay is available after this prospect has indexed research.</p></div>'}${inline?.content ?? ""}</div>
-<div class="notice" role="status"><p>Website research: ${indexLabel(selected)}.</p>${canResearch(selected) ? `<form method="post" action="/research-index"><input type="hidden" name="prospectId" value="${selected.id}"><p>Confirm a paid Firecrawl collection and OpenAI embedding request for ${escapeHtml(selected.website!)}.</p><button type="submit" name="confirm" value="research-index">Research &amp; Index Website</button></form>` : selected.websiteIndexStatus === "needs_review" && selected.websiteIndexHasEvidence ? `<form method="post" action="/research-index"><input type="hidden" name="prospectId" value="${selected.id}"><p>Confirm an embedding retry using saved research. Firecrawl will not run again.</p><button type="submit" name="confirm" value="research-index">Retry indexing</button></form>` : ""}</div>
-${renderAssessmentSection(selected, assessment)}
+${renderIntelligenceOverview(selected.companyName, assessment)}
 ${saved ? `<div class="notice success" role="status"><p>${saved === "created" ? "Prospect saved." : "Prospect already recorded. No duplicate was created."} Research has not started automatically.</p></div>` : ""}
+<div class="notice" role="status"><p>Website research: ${indexLabel(selected)}${selected.embeddedChunks ? ` · ${selected.embeddedChunks} indexed chunks` : ""}.</p>${canResearch(selected) ? `<form method="post" action="/research-index"><input type="hidden" name="prospectId" value="${selected.id}"><p>Confirm a paid Firecrawl collection and OpenAI embedding request for ${escapeHtml(selected.website!)}.</p><button type="submit" name="confirm" value="research-index">Research &amp; Index Website</button></form>` : selected.websiteIndexStatus === "needs_review" && selected.websiteIndexHasEvidence ? `<form method="post" action="/research-index"><input type="hidden" name="prospectId" value="${selected.id}"><p>Confirm an embedding retry using saved research. Firecrawl will not run again.</p><button type="submit" name="confirm" value="research-index">Retry indexing</button></form>` : ""}</div>
+<div class="ask-area">${selected.embeddedChunks && (!selected.websiteIndexStatus || selected.websiteIndexStatus === "ready") ? `<details class="panel ask-disclosure" open><summary>Ask Relay</summary>${askForm({ askId, prospects: [selected], selected: selected.id, fixedProspect: true }, "Ask Relay", true)}</details>` : '<div class="notice warning" role="status"><p>Ask Relay is available after this prospect has indexed research.</p></div>'}${inline?.content ?? ""}</div>
+${renderAssessmentSection(selected, assessment)}
 <details class="panel details"><summary>Business details</summary><dl>
 <div><dt>Website</dt><dd>${escapeHtml(selected.website ?? "Not provided")}</dd></div>
 <div><dt>Industry</dt><dd>${escapeHtml(selected.industry ?? "Not provided")}</dd></div>
 <div><dt>Contact</dt><dd>${escapeHtml(selected.contactName ?? "Not provided")}</dd></div>
 <div><dt>Contact email</dt><dd>${escapeHtml(selected.contactEmail ?? "Not provided")}</dd></div>
-<div><dt>Status</dt><dd>${escapeHtml(statusLabel(selected))}</dd></div>
-<div><dt>Research</dt><dd>${selected.embeddedChunks ? `${selected.embeddedChunks} indexed chunks` : "Not indexed"}</dd></div>
+<div><dt>Legacy outreach stage</dt><dd>${escapeHtml(statusLabel(selected))}</dd></div>
+<div><dt>Website research</dt><dd>${escapeHtml(indexLabel(selected))}${selected.embeddedChunks ? ` · ${selected.embeddedChunks} indexed chunks` : ""}</dd></div>
 </dl></details>
 </section>`
     : '<section aria-label="Prospect detail"><p class="empty">Select a prospect to view details and Ask Relay.</p></section>';

@@ -68,7 +68,10 @@ test("the section is collapsible, offers one explicit paid action, and matches t
 
 test("a completed assessment shows summary, fit, verified quotes, hypotheses, unknowns, and questions", () => {
   const html = page(indexed, history(record()));
-  assert.match(html, /<details class="panel assessment" open>/);
+  assert.match(html, /<section class="panel intelligence" aria-label="Prospect intelligence overview">/);
+  assert.match(html, /<details class="panel assessment"><summary>Detailed Assessment<\/summary>/);
+  assert.ok(html.indexOf("Prospect intelligence") < html.indexOf("Ask Relay"));
+  assert.match(html, /Assessment: <strong>Current<\/strong>/);
   assert.match(html, /Status: <strong>Current<\/strong>/);
   assert.doesNotMatch(html, /Generate Assessment/);
   assert.match(html, /This assessment matches the current research/);
@@ -132,7 +135,7 @@ test("model text is escaped, withheld parts explain themselves, and an old resul
   // A version-2 row with an unexpected inner shape falls back instead of throwing.
   const odd = page(indexed, history(record({ result: { ...built.result, categories: [null], fit: { signals: [], unknowns: [] } } })));
   assert.match(odd, /could not be displayed/);
-  assert.match(odd, /Lead Intake Assessment/);
+  assert.match(odd, /Detailed Assessment/);
 
   for (const schemaVersion of [1, 2]) {
     const old = page(indexed, history(record({ result: { schemaVersion } })));
